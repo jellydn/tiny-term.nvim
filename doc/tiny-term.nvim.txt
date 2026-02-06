@@ -82,6 +82,43 @@ PACKER.NVIM ~
 The plugin provides both Lua API and Vim commands for terminal management.
 
 
+SNACKS.TERMINAL OVERRIDE ~
+
+For zero-change compatibility with existing `Snacks.terminal` integrations, you
+can override `Snacks.terminal` with tiny-term:
+
+
+OPTION 1: AUTO-OVERRIDE IN SETUP
+
+>lua
+    {
+      "jellydn/tiny-term.nvim",
+      opts = {
+        override_snacks = true,  -- Automatically override Snacks.terminal
+      },
+    }
+<
+
+
+OPTION 2: MANUAL OVERRIDE
+
+>lua
+    -- After both plugins are loaded
+    require("tiny-term").override_snacks()
+<
+
+
+OPTION 3: DIRECT ASSIGNMENT
+
+>lua
+    Snacks.terminal = require("tiny-term")
+<
+
+All existing `Snacks.terminal()` calls will now use tiny-term without any code
+changes. This includes integrations from other plugins that use
+`Snacks.terminal`.
+
+
 BASIC USAGE ~
 
 >lua
@@ -262,6 +299,38 @@ Generate terminal ID for given command and options.
 >lua
     -- Returns: Terminal ID string
     local id = require("tiny-term").tid("lazygit")
+<
+
+
+PARSE(CMD)
+
+Parse a shell command string into a table of arguments.
+
+>lua
+    -- Returns: Parsed argument list
+    local args = require("tiny-term").parse('sh -c "echo hello"')
+    -- Result: {"sh", "-c", "echo hello"}
+<
+
+
+COLORIZE()
+
+Colorize the current buffer with ANSI color codes. Useful for viewing colorized
+command output.
+
+>bash
+    # Usage example:
+    ls -la --color=always | nvim - -c "lua require('tiny-term').colorize()"
+<
+
+
+OVERRIDE_SNACKS()
+
+Override `Snacks.terminal` with tiny-term for zero-change compatibility.
+
+>lua
+    -- Returns: tiny-term module for chaining
+    require("tiny-term").override_snacks()
 <
 
 
