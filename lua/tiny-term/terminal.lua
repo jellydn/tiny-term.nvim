@@ -16,49 +16,6 @@ M.terminals = {}
 local Terminal = {}
 Terminal.__index = Terminal
 
--- Double-esc state tracking for all terminals
-local esc_state = {
-  timer = nil,
-  count = 0,
-  delay_ms = 200,
-}
-
---- Clean up the double-esc timer
-local function cleanup_esc_timer()
-  if esc_state.timer then
-    esc_state.timer:close()
-    esc_state.timer = nil
-  end
-  esc_state.count = 0
-end
-
---- Handle double-esc keypress in terminal mode
---- @return boolean handled True if we should exit to normal mode
-local function handle_double_esc()
-  esc_state.count = esc_state.count + 1
-
-  if esc_state.count == 2 then
-    -- Double esc detected - exit to normal mode
-    cleanup_esc_timer()
-    return true
-  end
-
-  -- First esc - start timer
-  if esc_state.timer then
-    esc_state.timer:stop()
-  else
-    esc_state.timer = vim.uv.new_timer()
-  end
-
-  esc_state.timer:start(esc_state.delay_ms, 0, function()
-    -- Timer expired - single esc, let it pass through
-    esc_state.count = 0
-  end)
-
-  -- First esc - return false to let it pass through
-  return false
-end
-
 --- Create a new terminal object
 --- @param cmd string|nil Command to run (nil = shell)
 --- @param opts table|nil Options table
@@ -91,11 +48,62 @@ function Terminal.new(cmd, opts)
     cwd = opts.cwd or vim.fn.getcwd(),
     env = opts.env,
     job_id = nil,
-    autocmd_id = nil, -- Track TermClose autocmd for cleanup
-    keymap_ids = {}, -- Track keymap IDs for cleanup
+    exited = false,
+    autocmd_id = nil,
+    keymap_ids = {},
+    -- Per-terminal double-esc state
+    esc_state = {
+      timer = nil,
+      count = 0,
+      delay_ms = 200,
+    },
   }, Terminal)
 
   return self
+end
+
+--- Clean up the double-esc timer for this terminal
+function Terminal:cleanup_esc_timer()
+  if self.esc_state.timer then
+    self.esc_state.timer:close()
+    self.esc_state.timer = nil
+  end
+  self.esc_state.count = 0
+end
+
+--- Handle double-esc keypress in terminal mode
+--- @return boolean handled True if we should exit to normal mode
+function Terminal:handle_double_esc()
+  self.esc_state.count = self.esc_state.count + 1
+
+  if self.esc_state.count == 2 then
+    -- Double esc detected - exit to normal mode
+    self:cleanup_esc_timer()
+    return true
+  end
+
+  -- First esc - start timer
+  if self.esc_state.timer then
+    self.esc_state.timer:stop()
+  else
+    self.esc_state.timer = vim.uv.new_timer()
+  end
+
+  -- Timer callback wrapped in vim.schedule for proper event loop handling
+  self.esc_state.timer:start(self.esc_state.delay_ms, 0, function()
+    vim.schedule(function()
+      -- Timer expired - single esc, send ESC to terminal via channel
+      if self.job_id and self:buf_valid() then
+        -- Send ESC character (\27) to the terminal's channel
+        local chan = vim.fn.jobwait(self.job_id, 0)[1] or self.job_id
+        vim.api.nvim_chan_send(chan, "\27")
+      end
+      self.esc_state.count = 0
+    end)
+  end)
+
+  -- First esc - don't send anything yet, wait for timer
+  return false
 end
 
 --- Create the terminal buffer (without starting the process)
@@ -127,31 +135,17 @@ end
 --- Start the terminal process in the buffer
 --- Must be called when the buffer is the current buffer
 function Terminal:start_process()
-  local buf = self.buf
-
-  -- Build command for terminal
   local cmd = self.cmd or config.config.shell
   local cwd = self.cwd or vim.fn.getcwd()
 
-  -- Build environment for terminal
-  local env = self.env
-  if env then
-    -- Convert env table to format expected by termopen
-    local env_list = {}
-    for k, v in pairs(env) do
-      table.insert(env_list, k .. "=" .. tostring(v))
-    end
-    env = env_list
-  end
+  -- Use jobstart with term flag for Neovim 0.11+
+  -- Build command as list for jobstart
+  local cmd_list = type(cmd) == "table" and cmd or { "sh", "-c", cmd }
 
-  -- Change to working directory before starting terminal
-  vim.fn.chdir(cwd)
-
-  -- Start terminal process
-  -- termopen returns job_id on success, 0 on failure
-  local job_id = vim.fn.termopen(cmd, {
+  local job_id = vim.fn.jobstart(cmd_list, {
     cwd = cwd,
-    env = env,
+    env = self.env,
+    term = true,  -- Run in a terminal emulation
     on_exit = function(_, exit_code, _)
       -- Clean up when process exits
       self:handle_exit()
@@ -159,23 +153,25 @@ function Terminal:start_process()
   })
 
   if job_id == 0 then
-    error("Failed to start terminal: " .. tostring(cmd))
+    error("Failed to start terminal (invalid arguments): " .. tostring(cmd))
+  elseif job_id == -1 then
+    error("Failed to start terminal (not executable): " .. tostring(cmd))
   end
 
   self.job_id = job_id
+  self.exited = false
   self.process_started = true
 end
 
 --- Create a window for the terminal
 --- @return integer win Window ID
 function Terminal:create_window()
-  local position = window.get_window_position(self.opts)
-
-  -- Pass buffer and terminal to window creation function
   local opts = vim.tbl_deep_extend("force", self.opts, {
     buf = self.buf,
-    term = self, -- Pass terminal reference for winbar
+    cmd = self.cmd,
+    term = self,
   })
+  local position = window.get_window_position(opts)
 
   if position == "float" then
     -- Floating windows are never stacked
@@ -227,9 +223,8 @@ function Terminal:setup_keymaps()
       silent = true,
     }
 
-    -- Store keymap ID for cleanup
-    local keymap_id = vim.keymap.set(mode, lhs, rhs, opts)
-    table.insert(self.keymap_ids, keymap_id)
+    -- Note: vim.keymap.set returns nil, so we don't store it
+    vim.keymap.set(mode, lhs, rhs, opts)
 
     ::continue::
   end
@@ -238,7 +233,7 @@ function Terminal:setup_keymaps()
   -- This is a special keymap that handles the double-esc detection
   local esc_keymap_id = vim.api.nvim_buf_set_keymap(self.buf, "t", "<Esc>", "", {
     callback = function()
-      if handle_double_esc() then
+      if self:handle_double_esc() then
         -- Double esc detected - exit to normal mode
         vim.cmd("stopinsert")
       else
@@ -277,11 +272,11 @@ function Terminal:show()
 
   -- Start the terminal process if not already started
   if not self.process_started then
-    -- Switch to the terminal window and start the process
-    local current_win = vim.api.nvim_get_current_win()
-    vim.api.nvim_set_current_win(self.win)
-    self:start_process()
-    vim.api.nvim_set_current_win(current_win)
+    -- Use nvim_win_call to start process in the terminal window's context
+    -- This avoids focus flicker by not actually switching windows
+    vim.api.nvim_win_call(self.win, function()
+      self:start_process()
+    end)
   end
 
   -- Handle start_insert option
@@ -299,27 +294,21 @@ function Terminal:show()
   return self.win
 end
 
---- Hide the terminal window
---- For split windows, this hides the window but keeps it available for stacking
---- For floating windows, this closes the window
+--- Hide the terminal window (closes window, keeps buffer/process alive)
 function Terminal:hide()
-  if self:is_visible() then
-    local position = window.get_window_position(self.opts)
+  if not self:is_visible() then
+    return
+  end
 
-    if position == "float" then
-      -- Close floating windows (they're never stacked)
-      vim.api.nvim_win_close(self.win, true)
-    else
-      -- For split windows, just switch away but keep window
-      -- Don't close it as other terminals may be stacked here
-      local current_win = vim.api.nvim_get_current_win()
-      if current_win == self.win then
-        -- Switch to previous window
-        vim.cmd("wincmd p")
-      end
-    end
+  local win = self.win
+  self.win = nil
 
-    self.win = nil
+  if vim.api.nvim_get_current_win() == win then
+    vim.cmd("wincmd p")
+  end
+
+  if vim.api.nvim_win_is_valid(win) then
+    vim.api.nvim_win_close(win, true)
   end
 end
 
@@ -332,94 +321,66 @@ function Terminal:toggle()
   end
 end
 
---- Close the terminal
---- Kills process and deletes buffer
+--- Close the terminal (kills process, deletes buffer)
 function Terminal:close()
-  -- Clear the TermClose autocmd first to prevent double-cleanup
+  self.exited = true
+
+  -- Clean up the double-esc timer
+  self:cleanup_esc_timer()
+
   if self.autocmd_id then
     pcall(vim.api.nvim_del_autocmd, self.autocmd_id)
     self.autocmd_id = nil
   end
 
-  -- Kill the job if it's still running
   if self.job_id then
-    vim.fn.jobstop(self.job_id)
+    pcall(vim.fn.jobstop, self.job_id)
     self.job_id = nil
   end
 
-  -- Close window if open
-  if self:is_visible() then
-    local position = window.get_window_position(self.opts)
-    if position == "float" then
-      vim.api.nvim_win_close(self.win, true)
-    else
-      -- For split windows, switch away first
-      local current_win = vim.api.nvim_get_current_win()
-      if current_win == self.win then
-        vim.cmd("wincmd p")
-      end
-      -- Then close the window
-      vim.api.nvim_win_close(self.win, true)
-    end
-    self.win = nil
-  end
+  self:hide()
 
-  -- Delete buffer if valid
   if self:buf_valid() then
     vim.api.nvim_buf_delete(self.buf, { force = true })
     self.buf = nil
   end
 
-  -- Remove from terminals table
   M.terminals[self.id] = nil
 end
 
 --- Handle terminal process exit (called by TermClose autocmd)
---- Auto-closes window if configured, otherwise just cleans up
 function Terminal:handle_exit()
-  -- Clean up autocmd
+  if self.exited then
+    return
+  end
+  self.exited = true
+
+  -- Clean up the double-esc timer
+  self:cleanup_esc_timer()
+
   if self.autocmd_id then
-    vim.api.nvim_del_autocmd(self.autocmd_id)
+    pcall(vim.api.nvim_del_autocmd, self.autocmd_id)
     self.autocmd_id = nil
   end
 
-  -- Clear job ID
   self.job_id = nil
 
-  -- Handle auto_close option
   local auto_close = self.opts.auto_close
   if auto_close == nil then
     auto_close = config.config.auto_close
   end
 
   if auto_close then
-    -- Close window if configured
-    if self.win and vim.api.nvim_win_is_valid(self.win) then
-      local position = window.get_window_position(self.opts)
+    vim.schedule(function()
+      self:hide()
 
-      if position == "float" then
-        -- Close floating windows
-        vim.api.nvim_win_close(self.win, true)
-      else
-        -- For split windows, switch away but keep window
-        -- Don't close it as other terminals may be stacked here
-        local current_win = vim.api.nvim_get_current_win()
-        if current_win == self.win then
-          vim.cmd("wincmd p")
-        end
+      if self:buf_valid() then
+        vim.api.nvim_buf_delete(self.buf, { force = true })
+        self.buf = nil
       end
 
-      self.win = nil
-    end
-
-    -- Delete buffer
-    if self:buf_valid() then
-      vim.api.nvim_buf_delete(self.buf, { force = true })
-      self.buf = nil
-    end
-
-    -- Remove from terminals table
-    M.terminals[self.id] = nil
+      M.terminals[self.id] = nil
+    end)
   end
 end
 
@@ -483,16 +444,13 @@ end
 function M.get_or_create(cmd, opts)
   opts = opts or {}
 
-  -- Generate terminal ID to check if terminal already exists
   local id = util.tid(cmd, opts)
 
-  -- Return existing terminal if found and buffer is valid
   local existing = M.terminals[id]
-  if existing and existing:buf_valid() then
+  if existing and not existing.exited then
     return existing
   end
 
-  -- Create new terminal
   local term = Terminal.new(cmd, opts)
   M.terminals[id] = term
 

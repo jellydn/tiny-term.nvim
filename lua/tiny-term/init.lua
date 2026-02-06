@@ -9,11 +9,22 @@ local config = require("tiny-term.config")
 -- Expose config to users
 M.config = config.config
 
+---Set up highlight groups for tiny-term
+local function setup_highlights()
+  -- Link to existing highlights by default for consistency
+  vim.api.nvim_set_hl(0, "TinyTermNormal", { link = "NormalFloat", default = true })
+  vim.api.nvim_set_hl(0, "TinyTermBorder", { link = "FloatBorder", default = true })
+  vim.api.nvim_set_hl(0, "TinyTermWinbar", { link = "WinBar", default = true })
+end
+
 ---Setup tiny-term with user options
 ---@param opts? table User configuration options
 function M.setup(opts)
   local merged = config.setup(opts)
   M.config = merged
+
+  -- Set up highlight groups
+  setup_highlights()
 
   return M
 end
@@ -31,23 +42,17 @@ local util = require("tiny-term.util")
 function M.get(cmd, opts)
   opts = opts or {}
 
-  -- Generate terminal ID
   local id = util.tid(cmd, opts)
 
-  -- Check if terminal already exists
   local existing = terminal.get(id)
-  if existing and existing:buf_valid() then
+  if existing and not existing.exited then
     return existing, false
   end
 
-  -- Handle opts.create option (default true)
-  local should_create = opts.create ~= false
-
-  if not should_create then
+  if opts.create == false then
     return nil, nil
   end
 
-  -- Create new terminal
   local term = terminal.get_or_create(cmd, opts)
   return term, true
 end

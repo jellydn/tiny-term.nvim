@@ -3,19 +3,19 @@
 
 local M = {}
 
--- Track split windows by position for stacking
--- Format: position -> window_id
+-- Track split windows by tabpage and position for stacking
+-- Format: tabpage_id -> position -> window_id
 -- Positions: "bottom", "top", "left", "right"
 local split_windows = {}
 
 --- Get the window position string from options
---- @param opts table Options table containing win config
+--- Default: cmd provided → float, no cmd (shell) → bottom split
+--- @param opts table Options table containing win config and cmd
 --- @return string position Position string ("float", "bottom", "top", "left", "right")
 function M.get_window_position(opts)
   local win_opts = opts.win or {}
   local position = win_opts.position
 
-  -- Default to "float" when no cmd, "bottom" when cmd provided
   if not position then
     position = opts.cmd and "float" or "bottom"
   end
@@ -76,8 +76,14 @@ function M.create_float(opts)
   local win_id = vim.api.nvim_open_win(buf, true, config)
 
   -- Set window options for terminal
-  vim.api.nvim_win_set_option(win_id, "wrap", false)
-  vim.api.nvim_win_set_option(win_id, "signcolumn", "no")
+  vim.api.nvim_set_option_value("wrap", false, { win = win_id })
+  vim.api.nvim_set_option_value("signcolumn", "no", { win = win_id })
+  vim.api.nvim_set_option_value("winhighlight", "NormalFloat:TinyTermNormal,FloatBorder:TinyTermBorder", { win = win_id })
+
+  -- Store terminal ID on window for keymap access
+  if opts.term then
+    vim.api.nvim_win_set_var(win_id, "tiny_term_id", opts.term.id)
+  end
 
   return win_id
 end
@@ -117,6 +123,14 @@ function M.create_split(opts)
     vim.api.nvim_win_set_buf(win_id, opts.buf)
   end
 
+  -- Store terminal ID on window for keymap access
+  if opts.term then
+    vim.api.nvim_win_set_var(win_id, "tiny_term_id", opts.term.id)
+  end
+
+  -- Set winhighlight for split windows too
+  vim.api.nvim_set_option_value("winhighlight", "Normal:TinyTermNormal,FloatBorder:TinyTermBorder", { win = win_id })
+
   -- Return to previous window if we had one
   if vim.api.nvim_win_is_valid(current_win) then
     vim.api.nvim_set_current_win(current_win)
@@ -155,14 +169,24 @@ end
 --- @param position string Position ("bottom", "top", "left", "right")
 --- @param win_id integer Window ID
 function M.register_split(position, win_id)
-  split_windows[position] = win_id
+  local tabpage = vim.api.nvim_win_get_tabpage(win_id)
+  if not split_windows[tabpage] then
+    split_windows[tabpage] = {}
+  end
+  split_windows[tabpage][position] = win_id
 end
 
 --- Get the existing split window for a position, if valid
 --- @param position string Position ("bottom", "top", "left", "right")
 --- @return integer|nil win_id Window ID or nil if no valid split exists
 function M.get_split(position)
-  local win_id = split_windows[position]
+  local current_tab = vim.api.nvim_get_current_tabpage()
+  local tab_windows = split_windows[current_tab]
+  if not tab_windows then
+    return nil
+  end
+
+  local win_id = tab_windows[position]
 
   -- Check if window is still valid
   if win_id and vim.api.nvim_win_is_valid(win_id) then
@@ -173,7 +197,7 @@ function M.get_split(position)
   end
 
   -- Clear invalid entries
-  split_windows[position] = nil
+  tab_windows[position] = nil
   return nil
 end
 
@@ -181,15 +205,8 @@ end
 --- @param term TinyTerm.Terminal Terminal object
 --- @param win_id integer Window ID
 function M.setup_winbar(term, win_id)
-  if not win_id or not vim.api.nvim_win_is_valid(win_id) then
-    return
-  end
-
-  -- Create winbar showing terminal ID/title
-  local title = term.cmd or "shell"
-  local winbar = " " .. title .. " [" .. term.id .. "] "
-
-  vim.api.nvim_win_set_option(win_id, "winbar", winbar)
+  -- Winbar disabled - returns immediately
+  return
 end
 
 --- Stack a buffer in an existing split window, or create a new split
@@ -213,6 +230,8 @@ function M.stack_in_split(buf, position, opts)
     -- Update winbar if terminal object provided
     if opts.term then
       M.setup_winbar(opts.term, existing_win)
+      -- Update terminal ID on window
+      vim.api.nvim_win_set_var(existing_win, "tiny_term_id", opts.term.id)
     end
 
     return existing_win
@@ -247,6 +266,8 @@ function M.stack_in_split(buf, position, opts)
   -- Update winbar if terminal object provided
   if opts.term then
     M.setup_winbar(opts.term, win_id)
+    -- Store terminal ID on window for keymap access
+    vim.api.nvim_win_set_var(win_id, "tiny_term_id", opts.term.id)
   end
 
   -- Return to previous window if we had one

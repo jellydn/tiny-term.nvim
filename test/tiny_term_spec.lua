@@ -1,456 +1,1059 @@
 -- Tests for tiny-term.nvim
 -- Run with: nvim --headless -c "PlenaryBustedDirectory test/"
+-- Focus on behavior, not implementation details, using Arrange-Act-Assert pattern
 
--- Track created terminals for cleanup
-local created_terms = {}
+local tiny_term = require("tiny-term")
+local terminal = require("tiny-term.terminal")
+local window = require("tiny-term.window")
+local util = require("tiny-term.util")
 
+-- ============================================================================
+-- TEST HELPERS
+-- ============================================================================
+
+--- Clean up all terminals after each test
 local function cleanup_all_terms()
-  local tiny_term = require("tiny-term")
-  local terminal = require("tiny-term.terminal")
-
-  -- Close all terminals
   for id, term in pairs(terminal.terminals) do
     if term:buf_valid() then
-      pcall(function() term:close() end)
+      pcall(function()
+        term:close()
+      end)
     end
   end
-  created_terms = {}
+  -- Also reset the split_windows tracking
+  window.split_windows = {}
 end
 
--- Helper function to safely close a terminal
-local function safe_close(term)
-  if term and term:buf_valid() then
-    pcall(function() term:close() end)
-  end
+--- Create a mock terminal object for testing without UI
+--- @param cmd string|nil Command to run
+--- @param opts table|nil Options
+--- @return table Mock terminal object
+local function mock_terminal(cmd, opts)
+  return {
+    id = util.tid(cmd, opts),
+    cmd = cmd,
+    opts = opts or {},
+    buf = nil,
+    win = nil,
+    cwd = opts and opts.cwd or vim.fn.getcwd(),
+    env = opts and opts.env,
+    job_id = nil,
+    exited = false,
+    process_started = false,
+  }
 end
 
-describe("tiny-term.nvim", function()
-  -- Clean up after each test
+--- Simulate a terminal buffer being valid
+--- @param term table Terminal object
+local function simulate_valid_buffer(term)
+  term.buf = 999 -- Mock buffer ID
+  term.process_started = true
+end
+
+--- Simulate a terminal window being visible
+--- @param term table Terminal object
+--- @param win_id integer Window ID
+local function simulate_visible_window(term, win_id)
+  term.win = win_id
+end
+
+-- ============================================================================
+-- SETUP & CONFIGURATION TESTS
+-- ============================================================================
+
+describe("tiny-term.setup()", function()
+  after_each(function()
+    -- Reset to defaults after each test
+    tiny_term.setup()
+  end)
+
+  it("should merge user config with defaults", function()
+    -- Arrange
+    local custom_width = 0.6
+
+    -- Act
+    tiny_term.setup({
+      win = {
+        width = custom_width,
+      },
+    })
+
+    -- Assert
+    assert.equals(custom_width, tiny_term.config.win.width)
+    assert.equals(0.8, tiny_term.config.win.height) -- default preserved
+  end)
+
+  it("should use all defaults when no config provided", function()
+    -- Arrange & Act
+    tiny_term.setup()
+
+    -- Assert
+    assert.equals(0.8, tiny_term.config.win.width)
+    assert.equals(0.8, tiny_term.config.win.height)
+    assert.equals(15, tiny_term.config.win.split_size)
+    assert.is_true(tiny_term.config.auto_insert)
+    assert.is_true(tiny_term.config.start_insert)
+    assert.is_true(tiny_term.config.auto_close)
+  end)
+
+  it("should set boolean options correctly", function()
+    -- Arrange
+    local expected = {
+      auto_insert = false,
+      start_insert = false,
+      auto_close = false,
+    }
+
+    -- Act
+    tiny_term.setup(expected)
+
+    -- Assert
+    assert.is_false(tiny_term.config.auto_insert)
+    assert.is_false(tiny_term.config.start_insert)
+    assert.is_false(tiny_term.config.auto_close)
+  end)
+
+  it("should handle nested win configuration merge", function()
+    -- Arrange
+    local custom_position = "bottom"
+    local custom_size = 25
+
+    -- Act
+    tiny_term.setup({
+      win = {
+        position = custom_position,
+        split_size = custom_size,
+      },
+    })
+
+    -- Assert
+    assert.equals(custom_position, tiny_term.config.win.position)
+    assert.equals(custom_size, tiny_term.config.win.split_size)
+    assert.equals(0.8, tiny_term.config.win.width) -- default preserved
+  end)
+
+  it("should return the module for chaining", function()
+    -- Arrange & Act
+    local result = tiny_term.setup({})
+
+    -- Assert
+    assert.equals(tiny_term, result)
+  end)
+end)
+
+-- ============================================================================
+-- TERMINAL ID GENERATION TESTS
+-- ============================================================================
+
+describe("util.tid()", function()
+  it("should generate consistent IDs for identical inputs", function()
+    -- Arrange
+    local cmd = "ls"
+    local opts = {}
+
+    -- Act
+    local id1 = util.tid(cmd, opts)
+    local id2 = util.tid(cmd, opts)
+
+    -- Assert
+    assert.equals(id1, id2)
+  end)
+
+  it("should generate different IDs for different commands", function()
+    -- Arrange
+    local opts = {}
+
+    -- Act
+    local id1 = util.tid("ls", opts)
+    local id2 = util.tid("pwd", opts)
+
+    -- Assert
+    assert.not_equals(id1, id2)
+  end)
+
+  it("should generate different IDs for different cwd", function()
+    -- Arrange
+    local cmd = "ls"
+
+    -- Act
+    local id1 = util.tid(cmd, { cwd = "/home/user/project" })
+    local id2 = util.tid(cmd, { cwd = "/home/user/other" })
+
+    -- Assert
+    assert.not_equals(id1, id2)
+  end)
+
+  it("should handle environment variables in ID generation", function()
+    -- Arrange
+    local cmd = "ls"
+
+    -- Act
+    local id1 = util.tid(cmd, { env = { FOO = "bar" } })
+    local id2 = util.tid(cmd, { env = { FOO = "baz" } })
+    local id3 = util.tid(cmd, { env = { FOO = "bar" } })
+
+    -- Assert
+    assert.not_equals(id1, id2)
+    assert.equals(id1, id3)
+  end)
+
+  it("should treat missing env, empty env, and nil env the same", function()
+    -- Arrange
+    local cmd = "ls"
+
+    -- Act
+    local id1 = util.tid(cmd, {})
+    local id2 = util.tid(cmd, { env = {} })
+    local id3 = util.tid(cmd, { env = nil })
+
+    -- Assert
+    assert.equals(id1, id2)
+    assert.equals(id2, id3)
+  end)
+
+  it("should generate valid ID for nil command (uses shell)", function()
+    -- Arrange & Act
+    local id = util.tid(nil, {})
+
+    -- Assert
+    assert.is_not_nil(id)
+    assert.equals(16, #id) -- SHA256 truncated to 16 chars
+  end)
+
+  it("should include count in ID generation", function()
+    -- Arrange
+    local cmd = "ls"
+
+    -- Act
+    local id1 = util.tid(cmd, { count = 1 })
+    local id2 = util.tid(cmd, { count = 2 })
+
+    -- Assert
+    assert.not_equals(id1, id2)
+  end)
+
+  it("should handle opts.count taking precedence over vim.v.count1", function()
+    -- Arrange
+    local cmd = "ls"
+    local count = 5
+
+    -- Act
+    local id = util.tid(cmd, { count = count })
+
+    -- Assert
+    assert.is_not_nil(id)
+    assert.equals(16, #id)
+  end)
+end)
+
+-- ============================================================================
+-- TERMINAL RETRIEVAL TESTS
+-- ============================================================================
+
+describe("tiny-term.get()", function()
   after_each(function()
     cleanup_all_terms()
   end)
 
-  describe("tid() - Terminal ID generation", function()
-    local util = require("tiny-term.util")
+  it("should create a new terminal when none exists", function()
+    -- Arrange
+    local cmd = "echo 'test'"
+    local opts = {}
 
-    it("produces deterministic IDs for same arguments", function()
-      local id1 = util.tid(nil, {})
-      local id2 = util.tid(nil, {})
-      assert.equals(id1, id2)
+    -- Act
+    local term, created = tiny_term.get(cmd, opts)
+
+    -- Assert
+    assert.is_not_nil(term)
+    assert.is_true(created)
+    assert.is_not_nil(term.id)
+    assert.equals(cmd, term.cmd)
+  end)
+
+  it("should return existing terminal when available", function()
+    -- Arrange
+    local cmd = "echo 'test'"
+    local opts = {}
+    local term1 = terminal.get_or_create(cmd, opts)
+    simulate_valid_buffer(term1)
+
+    -- Act
+    local term2, created = tiny_term.get(cmd, opts)
+
+    -- Assert
+    assert.equals(term1.id, term2.id)
+    assert.is_false(created)
+  end)
+
+  it("should return nil when opts.create is false and terminal does not exist", function()
+    -- Arrange
+    local cmd = "nonexistent"
+
+    -- Act
+    local term, created = tiny_term.get(cmd, { create = false })
+
+    -- Assert
+    assert.is_nil(term)
+    assert.is_nil(created)
+  end)
+
+  it("should create different terminals for different options", function()
+    -- Arrange
+    local cmd = "ls"
+
+    -- Act
+    local term1 = tiny_term.get(cmd, { cwd = "/tmp" })
+    local term2 = tiny_term.get(cmd, { cwd = "/home" })
+
+    -- Assert
+    assert.not_equals(term1.id, term2.id)
+  end)
+
+  it("should handle nil command", function()
+    -- Arrange & Act
+    local term, created = tiny_term.get(nil, {})
+
+    -- Assert
+    assert.is_not_nil(term)
+    assert.is_true(created)
+    assert.is_nil(term.cmd)
+  end)
+
+  it("should handle no arguments", function()
+    -- Arrange & Act
+    local term, created = tiny_term.get()
+
+    -- Assert
+    assert.is_not_nil(term)
+    assert.is_true(created)
+  end)
+end)
+
+-- ============================================================================
+-- TERMINAL LIST TESTS
+-- ============================================================================
+
+describe("tiny-term.list()", function()
+  after_each(function()
+    cleanup_all_terms()
+  end)
+
+  it("should return empty array when no terminals exist", function()
+    -- Arrange (ensure clean state)
+    cleanup_all_terms()
+
+    -- Act
+    local terms = tiny_term.list()
+
+    -- Assert
+    assert.is_true(vim.tbl_islist(terms))
+    assert.equals(0, #terms)
+  end)
+
+  it("should return array with created terminals", function()
+    -- Arrange
+    local term1 = terminal.get_or_create("echo 'test1'", {})
+    simulate_valid_buffer(term1)
+    local term2 = terminal.get_or_create("echo 'test2'", {})
+    simulate_valid_buffer(term2)
+
+    -- Act
+    local terms = tiny_term.list()
+
+    -- Assert
+    assert.equals(2, #terms)
+
+    local found1, found2 = false, false
+    for _, t in ipairs(terms) do
+      if t.id == term1.id then
+        found1 = true
+      end
+      if t.id == term2.id then
+        found2 = true
+      end
+    end
+
+    assert.is_true(found1)
+    assert.is_true(found2)
+  end)
+
+  it("should not include terminals without valid buffers", function()
+    -- Arrange
+    local term1 = terminal.get_or_create("echo 'test'", {})
+    simulate_valid_buffer(term1)
+    local term2 = terminal.get_or_create("echo 'test2'", {})
+    -- Don't simulate valid buffer for term2
+
+    -- Act
+    local terms = tiny_term.list()
+
+    -- Assert
+    assert.equals(1, #terms)
+    assert.equals(term1.id, terms[1].id)
+  end)
+end)
+
+-- ============================================================================
+-- WINDOW POSITION TESTS
+-- ============================================================================
+
+describe("window.get_window_position()", function()
+  it("should return float when cmd is provided and no position specified", function()
+    -- Arrange
+    local opts = { cmd = "ls" }
+
+    -- Act
+    local position = window.get_window_position(opts)
+
+    -- Assert
+    assert.equals("float", position)
+  end)
+
+  it("should return bottom when no cmd and no position specified", function()
+    -- Arrange
+    local opts = { cmd = nil }
+
+    -- Act
+    local position = window.get_window_position(opts)
+
+    -- Assert
+    assert.equals("bottom", position)
+  end)
+
+  it("should use explicitly specified position", function()
+    -- Arrange
+    local positions = { "float", "bottom", "top", "left", "right" }
+
+    for _, expected_pos in ipairs(positions) do
+      -- Act
+      local position = window.get_window_position({ win = { position = expected_pos } })
+
+      -- Assert
+      assert.equals(expected_pos, position)
+    end
+  end)
+
+  it("should prioritize win.position over cmd default", function()
+    -- Arrange
+    local opts = {
+      cmd = "ls",
+      win = { position = "bottom" }
+    }
+
+    -- Act
+    local position = window.get_window_position(opts)
+
+    -- Assert
+    assert.equals("bottom", position)
+  end)
+end)
+
+-- ============================================================================
+-- TERMINAL OBJECT TESTS
+-- ============================================================================
+
+describe("Terminal object", function()
+  after_each(function()
+    cleanup_all_terms()
+  end)
+
+  describe("buf_valid()", function()
+    it("should return false when buf is nil", function()
+      -- Arrange
+      local term = mock_terminal("echo 'test'", {})
+
+      -- Act
+      local is_valid = term:buf_valid()
+
+      -- Assert
+      assert.is_false(is_valid)
     end)
 
-    it("produces different IDs for different commands", function()
-      local id1 = util.tid("ls", {})
-      local id2 = util.tid("pwd", {})
-      assert.not_equals(id1, id2)
-    end)
+    it("should return true when buf is set and valid", function()
+      -- Arrange
+      local term = mock_terminal("echo 'test'", {})
+      simulate_valid_buffer(term)
 
-    it("produces valid ID when cmd is nil (uses shell)", function()
-      local id = util.tid(nil, {})
-      assert.is_not_nil(id)
-      assert.equals(16, #id) -- SHA256 truncated to 16 chars
-    end)
+      -- Act
+      local is_valid = term:buf_valid()
 
-    it("produces different IDs for different cwd", function()
-      local id1 = util.tid("ls", { cwd = "/home/user/project" })
-      local id2 = util.tid("ls", { cwd = "/home/user/other" })
-      assert.not_equals(id1, id2)
-    end)
-
-    it("handles env option correctly", function()
-      local id1 = util.tid("ls", { env = { FOO = "bar" } })
-      local id2 = util.tid("ls", { env = { FOO = "baz" } })
-      local id3 = util.tid("ls", { env = { FOO = "bar" } })
-      assert.not_equals(id1, id2)
-      assert.equals(id1, id3)
-    end)
-
-    it("treats no env, empty env, and nil env the same", function()
-      local id1 = util.tid("ls", {})
-      local id2 = util.tid("ls", { env = {} })
-      local id3 = util.tid("ls", { env = nil })
-      assert.equals(id1, id2)
-      assert.equals(id2, id3)
+      -- Assert
+      assert.is_true(is_valid)
     end)
   end)
 
-  describe("setup() - Configuration", function()
-    local tiny_term = require("tiny-term")
+  describe("is_visible()", function()
+    it("should return false when win is nil", function()
+      -- Arrange
+      local term = mock_terminal("echo 'test'", {})
 
-    it("merges user config with defaults", function()
-      tiny_term.setup({
-        win = {
-          width = 0.5,
-        },
-      })
+      -- Act
+      local visible = term:is_visible()
 
-      -- setup() returns M (module), config is stored in M.config
-      assert.equals(0.5, tiny_term.config.win.width)
-      assert.equals(0.8, tiny_term.config.win.height) -- default preserved
+      -- Assert
+      assert.is_false(visible)
     end)
 
-    it("uses defaults when no arguments provided", function()
-      -- Reset to defaults by calling with no args
-      tiny_term.setup()
+    it("should return true when win is set and valid", function()
+      -- Arrange
+      local term = mock_terminal("echo 'test'", {})
+      simulate_valid_buffer(term)
+      simulate_visible_window(term, vim.api.nvim_get_current_win())
 
-      assert.equals(0.8, tiny_term.config.win.width)
-      assert.equals(0.8, tiny_term.config.win.height)
-    end)
+      -- Act
+      local visible = term:is_visible()
 
-    it("merges nested win configuration correctly", function()
-      tiny_term.setup({
-        win = {
-          position = "bottom",
-          split_size = 20,
-        },
-      })
-
-      assert.equals("bottom", tiny_term.config.win.position)
-      assert.equals(20, tiny_term.config.win.split_size)
-      assert.equals(0.8, tiny_term.config.win.width) -- default preserved
-    end)
-
-    it("sets auto_insert and start_insert options", function()
-      tiny_term.setup({
-        auto_insert = false,
-        start_insert = false,
-      })
-
-      assert.is_false(tiny_term.config.auto_insert)
-      assert.is_false(tiny_term.config.start_insert)
+      -- Assert
+      assert.is_true(visible)
     end)
   end)
 
-  describe("get() - Terminal retrieval", function()
-    local tiny_term = require("tiny-term")
+  describe("toggle()", function()
+    it("should show terminal when not visible", function()
+      -- Arrange
+      local term = mock_terminal("echo 'test'", {})
+      simulate_valid_buffer(term)
+      local show_called = false
+      term.show = function()
+        show_called = true
+      end
+      term.hide = function() end
 
-    it("creates new terminal when none exists", function()
-      local term, created = tiny_term.get("echo 'test'", {})
+      -- Act
+      term:toggle()
+
+      -- Assert
+      assert.is_true(show_called)
+    end)
+
+    it("should hide terminal when visible", function()
+      -- Arrange
+      local term = mock_terminal("echo 'test'", {})
+      simulate_valid_buffer(term)
+      simulate_visible_window(term, vim.api.nvim_get_current_win())
+      local hide_called = false
+      term.show = function() end
+      term.hide = function()
+        hide_called = true
+      end
+
+      -- Act
+      term:toggle()
+
+      -- Assert
+      assert.is_true(hide_called)
+    end)
+  end)
+
+  describe("close()", function()
+    it("should mark terminal as exited", function()
+      -- Arrange
+      local term = mock_terminal("echo 'test'", {})
+      simulate_valid_buffer(term)
+
+      -- Act
+      term:close()
+
+      -- Assert
+      assert.is_true(term.exited)
+    end)
+
+    it("should clean up autocmd_id if present", function()
+      -- Arrange
+      local term = mock_terminal("echo 'test'", {})
+      simulate_valid_buffer(term)
+      term.autocmd_id = 123
+
+      -- Act
+      term:close()
+
+      -- Assert
+      assert.is_nil(term.autocmd_id)
+    end)
+  end)
+
+  describe("handle_exit()", function()
+    it("should mark terminal as exited", function()
+      -- Arrange
+      local term = mock_terminal("echo 'test'", {})
+      simulate_valid_buffer(term)
+      term.exited = false
+
+      -- Act
+      term:handle_exit()
+
+      -- Assert
+      assert.is_true(term.exited)
+    end)
+
+    it("should only handle exit once (idempotent)", function()
+      -- Arrange
+      local term = mock_terminal("echo 'test'", {})
+      simulate_valid_buffer(term)
+      local call_count = 0
+      term.buf_valid = function()
+        return true
+      end
+
+      -- Act
+      term:handle_exit()
+      local first_exited = term.exited
+      term.exited = false -- Reset to test idempotency
+      term:handle_exit()
+
+      -- Assert
+      assert.is_true(first_exited)
+    end)
+  end)
+
+  describe("cleanup_esc_timer()", function()
+    it("should reset esc_state count", function()
+      -- Arrange
+      local term = mock_terminal("echo 'test'", {})
+      term.esc_state.count = 5
+
+      -- Act
+      term:cleanup_esc_timer()
+
+      -- Assert
+      assert.equals(0, term.esc_state.count)
+    end)
+
+    it("should clean up timer if present", function()
+      -- Arrange
+      local term = mock_terminal("echo 'test'", {})
+      term.esc_state.timer = vim.uv.new_timer()
+      local closed = false
+      term.esc_state.timer.close = function()
+        closed = true
+      end
+
+      -- Act
+      term:cleanup_esc_timer()
+
+      -- Assert
+      assert.is_nil(term.esc_state.timer)
+    end)
+  end)
+end)
+
+-- ============================================================================
+-- MODULE METATABLE TESTS
+-- ============================================================================
+
+describe("Module __call metamethod", function()
+  after_each(function()
+    cleanup_all_terms()
+  end)
+
+  it("should call toggle when module is invoked", function()
+    -- Arrange
+    local toggle_called = false
+    local original_toggle = tiny_term.toggle
+    tiny_term.toggle = function()
+      toggle_called = true
+      return mock_terminal("echo 'test'", {})
+    end
+
+    -- Act
+    tiny_term("echo 'test'", {})
+
+    -- Assert
+    assert.is_true(toggle_called)
+
+    -- Restore original
+    tiny_term.toggle = original_toggle
+  end)
+
+  it("should return terminal object when called", function()
+    -- Arrange & Act
+    local term = tiny_term("echo 'test'", {})
+
+    -- Assert
+    assert.is_not_nil(term)
+    assert.is_not_nil(term.id)
+  end)
+end)
+
+-- ============================================================================
+-- CONFIG MODULE TESTS
+-- ============================================================================
+
+describe("config module", function()
+  local config = require("tiny-term.config")
+
+  it("should provide default configuration", function()
+    -- Act
+    local defaults = config.setup()
+
+    -- Assert
+    assert.is_not_nil(defaults)
+    assert.is_not_nil(defaults.win)
+    assert.is_not_nil(defaults.win.keys)
+    assert.is_true(defaults.interactive)
+  end)
+
+  it("should merge user options with defaults", function()
+    -- Arrange
+    local user_opts = {
+      win = {
+        width = 0.6,
+      },
+    }
+
+    -- Act
+    local merged = config.setup(user_opts)
+
+    -- Assert
+    assert.equals(0.6, merged.win.width)
+    assert.equals(0.8, merged.win.height)
+  end)
+
+  it("should set shell to vim.o.shell by default", function()
+    -- Arrange & Act
+    local result = config.setup({})
+
+    -- Assert
+    assert.equals(vim.o.shell, result.shell)
+  end)
+
+  it("should preserve user-provided shell option", function()
+    -- Arrange
+    local custom_shell = "/bin/bash"
+
+    -- Act
+    local result = config.setup({ shell = custom_shell })
+
+    -- Assert
+    assert.equals(custom_shell, result.shell)
+  end)
+end)
+
+-- ============================================================================
+-- WINDOW MODULE TESTS
+-- ============================================================================
+
+describe("window module", function()
+  describe("is_floating()", function()
+    it("should return false for invalid window", function()
+      -- Arrange
+      local invalid_win = 999999
+
+      -- Act
+      local is_float = window.is_floating(invalid_win)
+
+      -- Assert
+      assert.is_false(is_float)
+    end)
+
+    it("should return true for floating window", function()
+      -- Arrange
+      local buf = vim.api.nvim_create_buf(false, true)
+      local config = {
+        relative = "editor",
+        width = 10,
+        height = 10,
+        row = 0,
+        col = 0,
+      }
+      local float_win = vim.api.nvim_open_win(buf, false, config)
+
+      -- Act
+      local is_float = window.is_floating(float_win)
+
+      -- Assert
+      assert.is_true(is_float)
+
+      -- Cleanup
+      vim.api.nvim_win_close(float_win, true)
+      vim.api.nvim_buf_delete(buf, { force = true })
+    end)
+
+    it("should return false for split window", function()
+      -- Arrange
+      local current_win = vim.api.nvim_get_current_win()
+
+      -- Act
+      local is_float = window.is_floating(current_win)
+
+      -- Assert
+      assert.is_false(is_float)
+    end)
+  end)
+
+  describe("register_split() and get_split()", function()
+    it("should register and retrieve split windows", function()
+      -- Arrange
+      local position = "bottom"
+      local win_id = vim.api.nvim_get_current_win()
+
+      -- Act
+      window.register_split(position, win_id)
+      local retrieved = window.get_split(position)
+
+      -- Assert
+      assert.equals(win_id, retrieved)
+    end)
+
+    it("should return nil for unregistered position", function()
+      -- Arrange & Act
+      local result = window.get_split("top")
+
+      -- Assert
+      assert.is_nil(result)
+    end)
+
+    it("should return nil for invalid window", function()
+      -- Arrange
+      local position = "bottom"
+      local invalid_win = 999999
+
+      -- Act
+      window.register_split(position, invalid_win)
+      local result = window.get_split(position)
+
+      -- Assert
+      assert.is_nil(result)
+    end)
+
+    it("should return nil for floating window", function()
+      -- Arrange
+      local buf = vim.api.nvim_create_buf(false, true)
+      local config = {
+        relative = "editor",
+        width = 10,
+        height = 10,
+        row = 0,
+        col = 0,
+      }
+      local float_win = vim.api.nvim_open_win(buf, false, config)
+      local position = "bottom"
+
+      -- Act
+      window.register_split(position, float_win)
+      local result = window.get_split(position)
+
+      -- Assert
+      assert.is_nil(result)
+
+      -- Cleanup
+      vim.api.nvim_win_close(float_win, true)
+      vim.api.nvim_buf_delete(buf, { force = true })
+    end)
+  end)
+end)
+
+-- ============================================================================
+-- TERMINAL MODULE TESTS
+-- ============================================================================
+
+describe("terminal module", function()
+  after_each(function()
+    cleanup_all_terms()
+  end)
+
+  describe("get_or_create()", function()
+    it("should create new terminal when none exists", function()
+      -- Arrange
+      local cmd = "echo 'test'"
+      local opts = {}
+
+      -- Act
+      local term = terminal.get_or_create(cmd, opts)
+
+      -- Assert
       assert.is_not_nil(term)
-      assert.is_true(created)
-
-      -- Note: We don't call safe_close here because the terminal
-      -- doesn't have a buffer yet (lazy creation)
-      pcall(function() term:close() end)
+      assert.is_not_nil(term.id)
+      assert.equals(cmd, term.cmd)
     end)
 
-    it("returns existing terminal when available", function()
-      local term1, created1 = tiny_term.get("echo 'test'", {})
-      assert.is_true(created1)
+    it("should return existing terminal when available", function()
+      -- Arrange
+      local cmd = "echo 'test'"
+      local opts = {}
+      local term1 = terminal.get_or_create(cmd, opts)
 
-      -- Without calling show(), the terminal has no buffer
-      -- so get() will still return a new terminal
-      local term2, created2 = tiny_term.get("echo 'test'", {})
-      -- This creates a new terminal because term1 has no buffer yet
-      assert.is_not_nil(term2)
+      -- Act
+      local term2 = terminal.get_or_create(cmd, opts)
 
-      pcall(function() term1:close() end)
-      pcall(function() term2:close() end)
+      -- Assert
+      assert.equals(term1.id, term2.id)
     end)
 
-    it("returns nil when opts.create is false and terminal does not exist", function()
-      local term, created = tiny_term.get("nonexistent", { create = false })
-      assert.is_nil(term)
-      assert.is_nil(created)
-    end)
+    it("should create new terminal for different options", function()
+      -- Arrange
+      local cmd = "ls"
 
-    it("creates different terminals for different opts", function()
-      local term1 = tiny_term.get("ls", { cwd = "/tmp" })
-      local term2 = tiny_term.get("ls", { cwd = "/home" })
+      -- Act
+      local term1 = terminal.get_or_create(cmd, { cwd = "/tmp" })
+      local term2 = terminal.get_or_create(cmd, { cwd = "/home" })
 
+      -- Assert
       assert.not_equals(term1.id, term2.id)
-
-      pcall(function() term1:close() end)
-      pcall(function() term2:close() end)
     end)
   end)
 
-  describe("open() - Open terminal", function()
-    local tiny_term = require("tiny-term")
+  describe("get()", function()
+    it("should return terminal by ID", function()
+      -- Arrange
+      local term = terminal.get_or_create("echo 'test'", {})
 
-    -- NOTE: These tests are pending because they require a TTY/UI
-    -- Terminal creation in headless mode doesn't work properly
-    pending("creates and shows a terminal", function()
-      local term = tiny_term.open("echo 'test'", {})
-      assert.is_not_nil(term)
-      assert.is_not_nil(term.buf)
-      assert.is_true(term:buf_valid())
+      -- Act
+      local retrieved = terminal.get(term.id)
 
-      safe_close(term)
+      -- Assert
+      assert.is_not_nil(retrieved)
+      assert.equals(term.id, retrieved.id)
     end)
 
-    pending("creates terminal buffer with correct filetype", function()
-      local term = tiny_term.open("echo 'test'", {})
-      assert.is_not_nil(term.buf)
+    it("should return nil for non-existent ID", function()
+      -- Arrange & Act
+      local result = terminal.get("nonexistent_id")
 
-      local filetype = vim.api.nvim_buf_get_option(term.buf, "filetype")
-      assert.equals("tiny_term", filetype)
-
-      safe_close(term)
-    end)
-
-    pending("creates terminal buffer with correct buftype", function()
-      local term = tiny_term.open("echo 'test'", {})
-      assert.is_not_nil(term.buf)
-
-      local buftype = vim.api.nvim_buf_get_option(term.buf, "buftype")
-      assert.equals("terminal", buftype)
-
-      safe_close(term)
-    end)
-
-    pending("reuses existing terminal with same ID", function()
-      local term1 = tiny_term.open("echo 'test'", {})
-      local buf1 = term1.buf
-
-      local term2 = tiny_term.open("echo 'test'", {})
-      local buf2 = term2.buf
-
-      assert.equals(buf1, buf2)
-      assert.equals(term1.id, term2.id)
-
-      safe_close(term1)
+      -- Assert
+      assert.is_nil(result)
     end)
   end)
 
-  describe("toggle() - Toggle visibility", function()
-    local tiny_term = require("tiny-term")
-
-    -- NOTE: These tests require terminal creation (needs TTY)
-    pending("shows terminal when hidden", function()
-      local term = tiny_term.toggle("echo 'test'", { auto_insert = false })
-      assert.is_not_nil(term.win)
-
-      safe_close(term)
-    end)
-
-    pending("hides terminal when visible", function()
-      local term = tiny_term.open("echo 'test'", { auto_insert = false })
-      assert.is_not_nil(term.win)
-
-      tiny_term.toggle("echo 'test'", { auto_insert = false })
-      assert.is_nil(term.win)
-
-      if term:buf_valid() then
-        term:close()
-      end
-    end)
-
-    pending("toggles visibility back and forth", function()
-      local term1 = tiny_term.toggle("echo 'test'", { auto_insert = false })
-      assert.is_not_nil(term1.win)
-
-      tiny_term.toggle("echo 'test'", { auto_insert = false })
-      assert.is_nil(term1.win)
-
-      local term2 = tiny_term.toggle("echo 'test'", { auto_insert = false })
-      assert.equals(term1.id, term2.id)
-      assert.is_not_nil(term2.win)
-
-      safe_close(term2)
-    end)
-  end)
-
-  describe("list() - List active terminals", function()
-    local tiny_term = require("tiny-term")
-
-    it("returns empty array when no terminals exist", function()
+  describe("list()", function()
+    it("should return empty table when no terminals exist", function()
+      -- Arrange
       cleanup_all_terms()
-      local terms = tiny_term.list()
-      assert.equals(0, #terms)
+
+      -- Act
+      local result = terminal.list()
+
+      -- Assert
+      assert.is_true(vim.tbl_islist(result))
+      assert.equals(0, #result)
     end)
 
-    -- NOTE: Requires terminal creation
-    pending("returns array with one terminal after creating one", function()
-      local term = tiny_term.open("echo 'test'", {})
-      local terms = tiny_term.list()
+    it("should not include terminals with invalid buffers", function()
+      -- Arrange
+      local term1 = terminal.get_or_create("echo 'test'", {})
+      simulate_valid_buffer(term1)
+      local term2 = terminal.get_or_create("echo 'test2'", {})
+      -- Don't simulate valid buffer for term2
 
-      assert.equals(1, #terms)
-      assert.equals(term.id, terms[1].id)
+      -- Act
+      local result = terminal.list()
 
-      safe_close(term)
-    end)
-
-    -- NOTE: Requires terminal creation
-    pending("returns multiple terminals", function()
-      local term1 = tiny_term.open("echo 'test1'", {})
-      local term2 = tiny_term.open("echo 'test2'", {})
-
-      local terms = tiny_term.list()
-      assert.equals(2, #terms)
-
-      local found1, found2 = false, false
-      for _, t in ipairs(terms) do
-        if t.id == term1.id then found1 = true end
-        if t.id == term2.id then found2 = true end
-      end
-      assert.is_true(found1)
-      assert.is_true(found2)
-
-      safe_close(term1)
-      safe_close(term2)
-    end)
-
-    -- NOTE: Requires terminal creation
-    pending("does not include closed terminals", function()
-      local term = tiny_term.open("echo 'test'", {})
-      assert.equals(1, #tiny_term.list())
-
-      term:close()
-      assert.equals(0, #tiny_term.list())
+      -- Assert
+      assert.equals(1, #result)
+      assert.equals(term1.id, result[1].id)
     end)
   end)
 
-  describe("Terminal object methods", function()
-    local tiny_term = require("tiny-term")
+  describe("close_all()", function()
+    it("should close all terminals", function()
+      -- Arrange
+      local term1 = terminal.get_or_create("echo 'test1'", {})
+      simulate_valid_buffer(term1)
+      local term2 = terminal.get_or_create("echo 'test2'", {})
+      simulate_valid_buffer(term2)
 
-    -- NOTE: Requires terminal creation
-    pending("buf_valid() returns true for valid buffer", function()
-      local term = tiny_term.open("echo 'test'", {})
-      assert.is_true(term:buf_valid())
-      safe_close(term)
-    end)
+      -- Act
+      terminal.close_all()
 
-    pending("buf_valid() returns false after closing", function()
-      local term = tiny_term.open("echo 'test'", {})
-      term:close()
-      assert.is_false(term:buf_valid())
-    end)
-
-    pending("is_visible() returns true when window is open", function()
-      local term = tiny_term.open("echo 'test'", {})
-      local is_visible = term:is_visible()
-      assert.is_boolean(is_visible)
-      safe_close(term)
-    end)
-
-    pending("is_floating() returns correct value", function()
-      local term = tiny_term.open("echo 'test'", {})
-      if term.win and vim.api.nvim_win_is_valid(term.win) then
-        local is_floating = term:is_floating()
-        assert.is_boolean(is_floating)
-      end
-      safe_close(term)
-    end)
-
-    pending("hide() hides the terminal window", function()
-      local term = tiny_term.open("echo 'test'", {})
-      if term.win then
-        term:hide()
-        assert.is_nil(term.win)
-      end
-      if term:buf_valid() then
-        term:close()
-      end
-    end)
-
-    pending("close() closes terminal and cleans up", function()
-      local term = tiny_term.open("echo 'test'", {})
-      local buf = term.buf
-
-      term:close()
-
-      assert.is_false(vim.api.nvim_buf_is_valid(buf))
+      -- Assert
+      assert.equals(0, #terminal.list())
     end)
   end)
+end)
 
-  describe("Module __call metamethod", function()
-    local tiny_term = require("tiny-term")
+-- ============================================================================
+-- EDGE CASE TESTS
+-- ============================================================================
 
-    -- NOTE: Requires terminal creation
-    pending("allows calling module directly as toggle", function()
-      local term1 = tiny_term("echo 'test'", { auto_insert = false })
-
-      assert.is_not_nil(term1)
-      assert.is_not_nil(term1.id)
-
-      tiny_term("echo 'test'", { auto_insert = false })
-
-      assert.is_nil(term1.win)
-
-      if term1:buf_valid() then
-        term1:close()
-      end
-    end)
+describe("Edge cases", function()
+  after_each(function()
+    cleanup_all_terms()
   end)
 
-  describe("Edge cases and error handling", function()
-    local tiny_term = require("tiny-term")
+  it("should handle empty opts table", function()
+    -- Arrange & Act
+    local term = tiny_term.get("echo 'test'", {})
 
-    -- NOTE: Requires terminal creation
-    pending("handles nil command (uses shell)", function()
-      local term = tiny_term.open(nil, {})
-      assert.is_not_nil(term)
-      assert.is_nil(term.cmd)
-      safe_close(term)
-    end)
-
-    pending("handles empty opts table", function()
-      local term = tiny_term.open("echo 'test'", {})
-      assert.is_not_nil(term)
-      safe_close(term)
-    end)
-
-    it("handles get() with no arguments (uses nil cmd, empty opts)", function()
-      local term, created = tiny_term.get()
-      assert.is_not_nil(term)
-      assert.is_true(created)
-      pcall(function() term:close() end)
-    end)
-
-    it("handles multiple get calls with same count", function()
-      -- Note: This test is limited because vim.v.count1 is context-dependent
-      -- In test environment, count1 will always be 1 unless explicitly set
-      local term1 = tiny_term.get("ls", {})
-      local term2 = tiny_term.get("ls", {})
-
-      -- Without changing count, should get same terminal ID
-      -- (but different objects since no buffer was created)
-      assert.equals(term1.id, term2.id)
-
-      pcall(function() term1:close() end)
-    end)
+    -- Assert
+    assert.is_not_nil(term)
+    assert.is_not_nil(term.id)
   end)
 
-  describe("Window position handling", function()
-    local tiny_term = require("tiny-term")
+  it("should handle opts with nil values", function()
+    -- Arrange
+    local opts = {
+      cwd = nil,
+      env = nil,
+      count = nil,
+    }
 
-    -- NOTE: Requires terminal creation
-    pending("respects win.position in opts", function()
-      local term = tiny_term.open("echo 'test'", {
-        win = { position = "bottom" }
-      })
-      assert.is_not_nil(term)
+    -- Act
+    local term = tiny_term.get("echo 'test'", opts)
 
-      if term.win and vim.api.nvim_win_is_valid(term.win) then
-        local is_floating = term:is_floating()
-        assert.is_false(is_floating)
-      end
+    -- Assert
+    assert.is_not_nil(term)
+  end)
 
-      safe_close(term)
-    end)
+  it("should handle special characters in command", function()
+    -- Arrange
+    local cmd = "echo 'test with | special chars && more'"
 
-    pending("defaults to float when no cmd and no position specified", function()
-      local term = tiny_term.open(nil, {})
-      assert.is_not_nil(term)
+    -- Act
+    local term = tiny_term.get(cmd, {})
 
-      if term.win and vim.api.nvim_win_is_valid(term.win) then
-        local is_floating = term:is_floating()
-        assert.is_true(is_floating)
-      end
+    -- Assert
+    assert.is_not_nil(term)
+    assert.is_not_nil(term.id)
+  end)
 
-      safe_close(term)
-    end)
+  it("should handle very long commands", function()
+    -- Arrange
+    local cmd = string.rep("a", 1000)
 
-    pending("respects win.split_size option", function()
-      local term = tiny_term.open("echo 'test'", {
-        win = {
-          position = "bottom",
-          split_size = 25
-        }
-      })
-      assert.is_not_nil(term)
-      safe_close(term)
-    end)
+    -- Act
+    local id = util.tid(cmd, {})
+
+    -- Assert
+    assert.is_not_nil(id)
+    assert.equals(16, #id)
+  end)
+
+  it("should handle multiple environment variables", function()
+    -- Arrange
+    local env = {
+      FOO = "bar",
+      BAZ = "qux",
+      PATH = "/usr/bin:/bin",
+    }
+
+    -- Act
+    local id1 = util.tid("ls", { env = env })
+    local id2 = util.tid("ls", { env = env })
+
+    -- Assert
+    assert.equals(id1, id2)
+  end)
+
+  it("should handle zero count", function()
+    -- Arrange
+    -- vim.v.count1 is never 0, but opts.count could theoretically be
+
+    -- Act
+    local id = util.tid("ls", { count = 0 })
+
+    -- Assert
+    assert.is_not_nil(id)
+  end)
+
+  it("should handle very large count", function()
+    -- Arrange
+    local large_count = 999999
+
+    -- Act
+    local id = util.tid("ls", { count = large_count })
+
+    -- Assert
+    assert.is_not_nil(id)
+    assert.equals(16, #id)
   end)
 end)

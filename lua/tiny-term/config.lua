@@ -16,8 +16,8 @@ local defaults = {
 
   -- Window configuration
   win = {
-    -- Position: "float" (no cmd) or "bottom" (with cmd)
-    position = "float",
+    -- Position: "float", "bottom", "top", "left", "right"
+    -- Default: auto (cmd provided -> "float", no cmd -> "bottom")
 
     -- Float window size (as fraction of editor)
     width = 0.8,
@@ -41,9 +41,14 @@ local defaults = {
       {
         "q",
         function()
-          local term = require("tiny-term").get()
-          if term then
-            term:hide()
+          local current_win = vim.api.nvim_get_current_win()
+          local ok, term_id = pcall(vim.api.nvim_win_get_var, current_win, "tiny_term_id")
+          if ok and term_id then
+            local terminal = require("tiny-term.terminal")
+            local term = terminal.get(term_id)
+            if term and type(term.hide) == "function" then
+              term:hide()
+            end
           end
         end,
         mode = "n",
@@ -56,9 +61,14 @@ local defaults = {
         function()
           local file = vim.fn.expand("<cfile>")
           if file ~= "" then
-            local term = require("tiny-term").get()
-            if term then
-              term:hide()
+            local current_win = vim.api.nvim_get_current_win()
+            local ok, term_id = pcall(vim.api.nvim_win_get_var, current_win, "tiny_term_id")
+            if ok and term_id then
+              local terminal = require("tiny-term.terminal")
+              local term = terminal.get(term_id)
+              if term and type(term.hide) == "function" then
+                term:hide()
+              end
             end
             vim.cmd("e " .. file)
           end

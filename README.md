@@ -110,8 +110,8 @@ require("tiny-term").setup({
 
   -- Window configuration
   win = {
-    -- Position: "float" (default) or "bottom", "top", "left", "right"
-    position = "float",
+    -- Position: "float", "bottom", "top", "left", "right"
+    -- Default: auto (cmd provided -> "float", no cmd -> "bottom")
 
     -- Float window size (as fraction of editor)
     width = 0.8,
@@ -144,8 +144,8 @@ require("tiny-term").setup({
 
 ### Window Position Behavior
 
-- **Without command** (`toggle()`, `toggle(nil)`) → Opens in **float** by default
-- **With command** (`toggle("lazygit")`) → Opens in **bottom split** by default
+- **With command** (`toggle("lazygit")`) → Opens in **float** by default
+- **Without command** (`toggle()`, `toggle(nil)`) → Opens in **bottom split** by default
 - Override with `opts.win.position`: `toggle("lazygit", { win = { position = "float" } })`
 
 ### Terminal IDs
