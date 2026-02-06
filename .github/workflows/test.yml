@@ -14,7 +14,7 @@ jobs:
         neovim_version: ['nightly', 'stable']
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Download stylua
         shell: bash
         run: |
