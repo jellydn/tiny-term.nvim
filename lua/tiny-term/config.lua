@@ -43,12 +43,14 @@ local defaults = {
         function()
           local current_win = vim.api.nvim_get_current_win()
           local ok, term_id = pcall(vim.api.nvim_win_get_var, current_win, "tiny_term_id")
-          if ok and term_id then
-            local terminal = require("tiny-term.terminal")
-            local term = terminal.get(term_id)
-            if term and type(term.hide) == "function" then
-              term:hide()
-            end
+          if not (ok and term_id) then
+            return
+          end
+
+          local terminal = require("tiny-term.terminal")
+          local term = terminal.get(term_id)
+          if term and type(term.hide) == "function" then
+            term:hide()
           end
         end,
         mode = "n",
@@ -60,18 +62,22 @@ local defaults = {
         "gf",
         function()
           local file = vim.fn.expand("<cfile>")
-          if file ~= "" then
-            local current_win = vim.api.nvim_get_current_win()
-            local ok, term_id = pcall(vim.api.nvim_win_get_var, current_win, "tiny_term_id")
-            if ok and term_id then
-              local terminal = require("tiny-term.terminal")
-              local term = terminal.get(term_id)
-              if term and type(term.hide) == "function" then
-                term:hide()
-              end
-            end
-            vim.cmd("e " .. file)
+          if file == "" then
+            return
           end
+
+          -- Hide terminal before opening file
+          local current_win = vim.api.nvim_get_current_win()
+          local ok, term_id = pcall(vim.api.nvim_win_get_var, current_win, "tiny_term_id")
+          if ok and term_id then
+            local terminal = require("tiny-term.terminal")
+            local term = terminal.get(term_id)
+            if term and type(term.hide) == "function" then
+              term:hide()
+            end
+          end
+
+          vim.cmd("e " .. file)
         end,
         mode = "n",
         desc = "Open file under cursor",
@@ -88,6 +94,10 @@ local defaults = {
   -- When false, disables all three options (default: true)
   -- Matches Snacks.terminal API
   interactive = true,
+
+  -- Auto-override Snacks.terminal with tiny-term for zero-change compatibility
+  -- When true, automatically replaces Snacks.terminal with tiny-term
+  override_snacks = false,
 }
 
 -- Current configuration (set by setup())

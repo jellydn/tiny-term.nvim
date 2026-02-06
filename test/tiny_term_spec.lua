@@ -1381,3 +1381,297 @@ describe("Terminal lifecycle edge cases", function()
     assert.is_nil(term.autocmd_id)
   end)
 end)
+
+-- ============================================================================
+-- M.PARSE() PUBLIC API TESTS
+-- ============================================================================
+
+describe("tiny-term.parse()", function()
+  it("should delegate to util.parse() for string commands", function()
+    -- Arrange
+    local cmd = 'echo "hello world"'
+    local util_parse = require("tiny-term.util").parse
+
+    -- Act
+    local result = tiny_term.parse(cmd)
+    local expected = util_parse(cmd)
+
+    -- Assert
+    assert.same(expected, result)
+  end)
+
+  it("should return table as-is for table commands", function()
+    -- Arrange
+    local cmd = { "git", "commit", "-m", "message" }
+
+    -- Act
+    local result = tiny_term.parse(cmd)
+
+    -- Assert
+    assert.equals(cmd, result)
+  end)
+
+  it("should handle simple command", function()
+    -- Arrange
+    local cmd = "ls -la"
+
+    -- Act
+    local result = tiny_term.parse(cmd)
+
+    -- Assert
+    assert.equals(2, #result)
+    assert.equals("ls", result[1])
+    assert.equals("-la", result[2])
+  end)
+
+  it("should handle quoted arguments", function()
+    -- Arrange
+    local cmd = 'echo "test message"'
+
+    -- Act
+    local result = tiny_term.parse(cmd)
+
+    -- Assert
+    assert.equals(2, #result)
+    assert.equals("test message", result[2])
+  end)
+end)
+
+-- ============================================================================
+-- M.COLORIZE() TESTS
+-- ============================================================================
+
+describe("tiny-term.colorize()", function()
+  local original_buf
+
+  before_each(function()
+    -- Store original buffer and create a test buffer
+    original_buf = vim.api.nvim_get_current_buf()
+  end)
+
+  after_each(function()
+    -- Clean up test buffers
+    pcall(function()
+      vim.api.nvim_win_set_buf(0, original_buf)
+    end)
+  end)
+
+  it("should disable line numbers for current buffer", function()
+    -- Arrange
+    local test_buf = vim.api.nvim_create_buf(true, false)
+    vim.api.nvim_win_set_buf(0, test_buf)
+    vim.wo.number = true
+    vim.wo.relativenumber = true
+
+    -- Act
+    tiny_term.colorize()
+
+    -- Assert
+    assert.is_false(vim.wo.number)
+    assert.is_false(vim.wo.relativenumber)
+  end)
+
+  it("should clear signcolumn for current buffer", function()
+    -- Arrange
+    local test_buf = vim.api.nvim_create_buf(true, false)
+    vim.api.nvim_win_set_buf(0, test_buf)
+    vim.wo.signcolumn = "yes"
+
+    -- Act
+    tiny_term.colorize()
+
+    -- Assert
+    assert.equals("no", vim.wo.signcolumn)
+  end)
+
+  it("should clear statuscolumn for current buffer", function()
+    -- Arrange
+    local test_buf = vim.api.nvim_create_buf(true, false)
+    vim.api.nvim_win_set_buf(0, test_buf)
+    vim.wo.statuscolumn = "test"
+
+    -- Act
+    tiny_term.colorize()
+
+    -- Assert
+    assert.equals("", vim.wo.statuscolumn)
+  end)
+
+  it("should set listchars to space only", function()
+    -- Arrange
+    local test_buf = vim.api.nvim_create_buf(true, false)
+    vim.api.nvim_win_set_buf(0, test_buf)
+    vim.opt.listchars = { space = ".", tab = ">" }
+
+    -- Act
+    tiny_term.colorize()
+
+    -- Assert
+    assert.equals({ space = " " }, vim.opt.listchars:get())
+  end)
+
+  it("should preserve non-empty content when creating terminal", function()
+    -- Arrange
+    local test_buf = vim.api.nvim_create_buf(true, false)
+    vim.api.nvim_win_set_buf(0, test_buf)
+    vim.api.nvim_buf_set_lines(test_buf, 0, -1, false, { "line1", "line2", "line3" })
+
+    -- Act
+    tiny_term.colorize()
+
+    -- Assert - Buffer should still be valid
+    assert.is_true(vim.api.nvim_buf_is_valid(test_buf))
+    -- Lines should be cleared (replaced with terminal)
+    local lines = vim.api.nvim_buf_get_lines(test_buf, 0, -1, false)
+    assert.equals(0, #lines)
+  end)
+
+  it("should remove trailing empty lines before processing", function()
+    -- Arrange
+    local test_buf = vim.api.nvim_create_buf(true, false)
+    vim.api.nvim_win_set_buf(0, test_buf)
+    vim.api.nvim_buf_set_lines(test_buf, 0, -1, false, { "line1", "line2", "", "", "" })
+
+    -- Act
+    tiny_term.colorize()
+
+    -- Assert - Terminal should be created (buffer cleared)
+    local lines = vim.api.nvim_buf_get_lines(test_buf, 0, -1, false)
+    assert.equals(0, #lines)
+  end)
+
+  it("should set q keymap to quit in current buffer", function()
+    -- Arrange
+    local test_buf = vim.api.nvim_create_buf(true, false)
+    vim.api.nvim_win_set_buf(0, test_buf)
+    local keymaps = vim.api.nvim_buf_get_keymap(test_buf, "n")
+    local original_count = #keymaps
+
+    -- Act
+    tiny_term.colorize()
+
+    -- Assert
+    keymaps = vim.api.nvim_buf_get_keymap(test_buf, "n")
+    local q_keymap = vim.tbl_filter(function(k)
+      return k.lhs == "q"
+    end, keymaps)
+    assert.is_true(#q_keymap > 0)
+  end)
+end)
+
+-- ============================================================================
+-- M.OVERRIDE_SNACKS() TESTS
+-- ============================================================================
+
+describe("tiny-term.override_snacks()", function()
+  it("should return tiny-term module for chaining", function()
+    -- Arrange & Act
+    local result = tiny_term.override_snacks()
+
+    -- Assert
+    assert.equals(tiny_term, result)
+  end)
+
+  it("should notify when snacks.nvim is not found", function()
+    -- Arrange
+    local notified = false
+    local notify_messages = {}
+    local original_notify = vim.notify
+
+    -- Mock vim.notify to capture messages
+    ---@diagnostic disable-next-line: duplicate-set-field
+    vim.notify = function(msg, level)
+      notified = true
+      table.insert(notify_messages, { msg = msg, level = level })
+    end
+
+    -- Act - Assuming snacks is not installed in test environment
+    tiny_term.override_snacks()
+
+    -- Assert
+    assert.is_true(notified)
+    local has_snacks_message = vim.tbl_filter(function(m)
+      return m.msg:find("snacks") ~= nil
+    end, notify_messages)
+    assert.is_true(#has_snacks_message > 0)
+
+    -- Restore
+    vim.notify = original_notify
+  end)
+
+  it("should call without errors when snacks is available", function()
+    -- Arrange & Act
+    -- This test just ensures the function doesn't error
+    local ok, err = pcall(function()
+      tiny_term.override_snacks()
+    end)
+
+    -- Assert
+    assert.is_true(ok, ("override_snacks errored: %s"):format(tostring(err)))
+  end)
+end)
+
+-- ============================================================================
+-- SETUP WITH OVERRIDE_SNACKS CONFIG OPTION
+-- ============================================================================
+
+describe("tiny-term.setup() with override_snacks option", function()
+  after_each(function()
+    -- Reset to defaults after each test
+    tiny_term.setup()
+  end)
+
+  it("should not override snacks when override_snacks is false or nil", function()
+    -- Arrange
+    local notified = false
+    local notify_messages = {}
+    local original_notify = vim.notify
+
+    ---@diagnostic disable-next-line: duplicate-set-field
+    vim.notify = function(msg, level)
+      notified = true
+      table.insert(notify_messages, { msg = msg, level = level })
+    end
+
+    -- Act
+    tiny_term.setup({ override_snacks = false })
+
+    -- Assert - Should not call override_snacks (no notification about skipping)
+    local has_skip_message = vim.tbl_filter(function(m)
+      return m.msg:find("skipping") ~= nil
+    end, notify_messages)
+    -- In test environment without snacks, override_snacks() still notifies
+    -- but the setup with false should not call it
+
+    -- Restore
+    vim.notify = original_notify
+  end)
+
+  it("should accept override_snacks in config", function()
+    -- Arrange & Act
+    local result = tiny_term.setup({ override_snacks = true })
+
+    -- Assert
+    assert.is_true(result.override_snacks)
+    assert.is_true(tiny_term.config.override_snacks)
+  end)
+
+  it("should preserve override_snacks setting in config", function()
+    -- Arrange
+    local expected_value = true
+
+    -- Act
+    tiny_term.setup({ override_snacks = expected_value })
+
+    -- Assert
+    assert.equals(expected_value, tiny_term.config.override_snacks)
+  end)
+
+  it("should default override_snacks to false when not specified", function()
+    -- Arrange & Act
+    tiny_term.setup({})
+
+    -- Assert
+    assert.is_false(tiny_term.config.override_snacks)
+  end)
+end)

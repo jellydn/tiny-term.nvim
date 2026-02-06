@@ -20,11 +20,21 @@ end
 ---Setup tiny-term with user options
 ---@param opts? table User configuration options
 function M.setup(opts)
+  opts = opts or {}
+
+  -- Store override_snacks flag before merging
+  local override_snacks = opts.override_snacks
+
   local merged = config.setup(opts)
   M.config = merged
 
   -- Set up highlight groups
   setup_highlights()
+
+  -- Auto-override Snacks.terminal if requested
+  if override_snacks then
+    M.override_snacks()
+  end
 
   return M
 end
@@ -119,6 +129,90 @@ end
 --- @return string id Terminal ID
 function M.tid(cmd, opts)
   return util.tid(cmd, opts)
+end
+
+--- Parse a shell command into a table of arguments
+---
+--- Handles spaces inside quotes (double quotes only) and backslash escapes.
+--- Compatible with Snacks.terminal.parse() for API compatibility.
+--- @param cmd string|string[] Command to parse
+--- @return string[] args Parsed arguments list
+function M.parse(cmd)
+  return util.parse(cmd)
+end
+
+--- Colorize the current buffer with ANSI color codes
+---
+--- Replaces ANSI codes with actual Neovim highlights using terminal buffer.
+--- Useful for viewing colorized command output in Neovim.
+---
+--- Usage example:
+--- ```bash
+--- ls -la --color=always | nvim - -c "lua require('tiny-term').colorize()"
+--- ```
+function M.colorize()
+  -- Disable UI elements for cleaner display
+  vim.wo.number = false
+  vim.wo.relativenumber = false
+  vim.wo.statuscolumn = ""
+  vim.wo.signcolumn = "no"
+  vim.opt.listchars = { space = " " }
+
+  local buf = vim.api.nvim_get_current_buf()
+  local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+
+  -- Remove trailing empty lines
+  while #lines > 0 and vim.trim(lines[#lines]) == "" do
+    lines[#lines] = nil
+  end
+
+  -- Clear buffer and open terminal
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, {})
+  local chan = vim.api.nvim_open_term(buf, {})
+  vim.api.nvim_chan_send(chan, table.concat(lines, "\r\n"))
+
+  -- Set up keymap to quit
+  vim.keymap.set("n", "q", "q", { silent = true, buffer = buf })
+
+  -- Auto-scroll to end on changes
+  vim.api.nvim_create_autocmd("TextChanged", {
+    buffer = buf,
+    callback = function()
+      pcall(vim.api.nvim_win_set_cursor, 0, { #lines, 0 })
+    end,
+  })
+
+  vim.api.nvim_create_autocmd("TermEnter", { buffer = buf, command = "stopinsert" })
+end
+
+--- Override Snacks.terminal with tiny-term for zero-change compatibility
+---
+--- Call this after both snacks.nvim and tiny-term.nvim are loaded.
+--- This allows existing code using Snacks.terminal to use tiny-term instead.
+---
+--- Usage:
+--- ```lua
+--- -- Option 1: Auto-override in setup
+--- require("tiny-term").setup({ override_snacks = true })
+---
+--- -- Option 2: Manual override
+--- require("tiny-term").override_snacks()
+---
+--- -- Option 3: Direct assignment
+--- Snacks.terminal = require("tiny-term")
+--- ```
+--- @return table self Returns tiny-term module for chaining
+function M.override_snacks()
+  local ok, snacks = pcall(require, "snacks")
+  if not ok then
+    vim.notify("tiny-term.nvim: snacks.nvim not found, skipping override", vim.log.levels.INFO)
+    return M
+  end
+
+  snacks.terminal = M
+  vim.notify("tiny-term.nvim: Snacks.terminal overridden", vim.log.levels.INFO)
+
+  return M
 end
 
 -- Module __call metatable: M(cmd, opts) -> M.toggle(cmd, opts)
