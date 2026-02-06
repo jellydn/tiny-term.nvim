@@ -1,6 +1,12 @@
 local M = {}
 
 --- Generate a deterministic terminal ID based on command, cwd, env, and count
+---
+--- Uses SHA256 hash for collision resistance and privacy.
+--- First 16 chars provide 64 bits of entropy (sufficient for practical use).
+--- Terminals with identical configurations (cmd, cwd, env, count) get the same ID,
+--- allowing reuse of existing terminal instances.
+---
 --- @param cmd string|nil The command to run in the terminal (nil = shell)
 --- @param opts table|nil Options table containing cwd, env, etc.
 --- @return string id The deterministic terminal ID

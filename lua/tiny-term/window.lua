@@ -3,7 +3,8 @@
 
 local M = {}
 
--- Track split windows by tabpage and position for stacking
+-- Track split windows by tabpage and position for stacking.
+-- Enables tmux-like behavior: multiple terminals at the same position reuse one split.
 -- Format: tabpage_id -> position -> window_id
 -- Positions: "bottom", "top", "left", "right"
 local split_windows = {}
@@ -70,19 +71,32 @@ function M.create_float(opts)
 
   -- Create the buffer if not provided
   local buf = opts.buf or vim.api.nvim_create_buf(false, true)
+  if not buf or buf == 0 then
+    error("Failed to create terminal buffer")
+  end
 
   -- Create the floating window
   -- nvim_open_win returns window ID
   local win_id = vim.api.nvim_open_win(buf, true, config)
+  if not win_id or win_id == 0 then
+    error("Failed to create floating window")
+  end
+  if not vim.api.nvim_win_is_valid(win_id) then
+    error("Window became invalid immediately after creation")
+  end
 
   -- Set window options for terminal
   vim.api.nvim_set_option_value("wrap", false, { win = win_id })
   vim.api.nvim_set_option_value("signcolumn", "no", { win = win_id })
-  vim.api.nvim_set_option_value("winhighlight", "NormalFloat:TinyTermNormal,FloatBorder:TinyTermBorder", { win = win_id })
+  vim.api.nvim_set_option_value(
+    "winhighlight",
+    "NormalFloat:TinyTermNormal,FloatBorder:TinyTermBorder",
+    { win = win_id }
+  )
 
   -- Store terminal ID on window for keymap access
   if opts.term then
-    vim.api.nvim_win_set_var(win_id, "tiny_term_id", opts.term.id)
+    pcall(vim.api.nvim_win_set_var, win_id, "tiny_term_id", opts.term.id)
   end
 
   return win_id
@@ -92,17 +106,23 @@ end
 --- @param position string Position ("bottom", "top", "left", "right")
 --- @param split_size number Size in rows/columns
 local function split_at(position, split_size)
+  local split_cmd
   if position == "bottom" then
-    vim.cmd("botright " .. split_size .. "split")
+    split_cmd = "botright " .. split_size .. "split"
   elseif position == "top" then
-    vim.cmd("topleft " .. split_size .. "split")
+    split_cmd = "topleft " .. split_size .. "split"
   elseif position == "right" then
-    vim.cmd("botright vertical " .. split_size .. "split")
+    split_cmd = "botright vertical " .. split_size .. "split"
   elseif position == "left" then
-    vim.cmd("topleft vertical " .. split_size .. "split")
+    split_cmd = "topleft vertical " .. split_size .. "split"
   else
     -- Default to bottom split for invalid position
-    vim.cmd("botright " .. split_size .. "split")
+    split_cmd = "botright " .. split_size .. "split"
+  end
+
+  local ok, err = pcall(vim.cmd, split_cmd)
+  if not ok then
+    error("Failed to create split: " .. tostring(err))
   end
 end
 
@@ -112,12 +132,15 @@ end
 local function configure_terminal_window(win_id, opts)
   -- Set buffer if provided
   if opts.buf then
+    if not vim.api.nvim_buf_is_valid(opts.buf) then
+      error("Invalid buffer provided to configure_terminal_window")
+    end
     vim.api.nvim_win_set_buf(win_id, opts.buf)
   end
 
   -- Store terminal ID on window for keymap access
   if opts.term then
-    vim.api.nvim_win_set_var(win_id, "tiny_term_id", opts.term.id)
+    pcall(vim.api.nvim_win_set_var, win_id, "tiny_term_id", opts.term.id)
   end
 
   -- Set winhighlight for terminal windows
@@ -227,7 +250,6 @@ function M.get_split(position)
   return nil
 end
 
-
 --- Stack a buffer in an existing split window, or create a new split
 --- @param buf integer Buffer ID to stack
 --- @param position string Position ("bottom", "top", "left", "right")
@@ -244,11 +266,14 @@ function M.stack_in_split(buf, position, opts)
 
   if existing_win then
     -- Reuse existing split: replace the buffer
+    if not vim.api.nvim_buf_is_valid(buf) then
+      error("Invalid buffer provided to stack_in_split")
+    end
     vim.api.nvim_win_set_buf(existing_win, buf)
 
     -- Update terminal ID on window
     if opts.term then
-      vim.api.nvim_win_set_var(existing_win, "tiny_term_id", opts.term.id)
+      pcall(vim.api.nvim_win_set_var, existing_win, "tiny_term_id", opts.term.id)
     end
 
     return existing_win

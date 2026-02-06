@@ -12,18 +12,6 @@ local window = require("tiny-term.window")
 ---@type table<string, TinyTerm.Terminal>
 M.terminals = {}
 
---- Get a config option value with fallback to global config
---- @param option_name string The option name to check
---- @param fallback any The fallback value if not set
---- @return any value The resolved option value
-local function get_opt_with_fallback(term, option_name, fallback)
-  local value = term.opts[option_name]
-  if value == nil then
-    value = fallback
-  end
-  return value
-end
-
 --- Terminal object metatable
 local Terminal = {}
 Terminal.__index = Terminal
@@ -38,15 +26,8 @@ function Terminal.new(cmd, opts)
   -- Generate terminal ID
   local id = util.tid(cmd, opts)
 
-  -- Handle interactive option (shortcut for start_insert, auto_insert, auto_close)
-  -- When interactive is true (default), set the three options if not explicitly provided
-  local interactive = opts.interactive
-  if interactive == nil then
-    interactive = config.config.interactive
-  end
-  local should_enable_interactive = interactive ~= false
-
-  if should_enable_interactive then
+  -- Interactive mode is a shortcut for start_insert, auto_insert, and auto_close
+  if (opts.interactive == nil or opts.interactive ~= false) and config.config.interactive ~= false then
     opts.start_insert = opts.start_insert ~= nil and opts.start_insert or true
     opts.auto_insert = opts.auto_insert ~= nil and opts.auto_insert or true
     opts.auto_close = opts.auto_close ~= nil and opts.auto_close or true
@@ -107,8 +88,6 @@ function Terminal:handle_double_esc()
     vim.schedule(function()
       -- Timer expired - single esc, send ESC to terminal via channel
       if self.job_id and self:buf_valid() then
-        -- Send ESC character (\27) to the terminal's channel
-        -- For terminal jobs, job_id is the channel
         vim.api.nvim_chan_send(self.job_id, "\27")
       end
       self.esc_state.count = 0
@@ -209,9 +188,6 @@ function Terminal:setup_keymaps()
   local keys = config.config.win.keys or {}
   local is_floating = self:is_floating()
 
-  -- Clear existing keymaps for this buffer
-  self:clear_keymaps()
-
   -- Set buffer-local keymaps
   for _, keymap in ipairs(keys) do
     -- Check if keymap is disabled
@@ -261,11 +237,6 @@ function Terminal:setup_keymaps()
   })
 end
 
---- Clear keymaps for the terminal buffer
-function Terminal:clear_keymaps()
-  -- Buffer-local keymaps are cleared when buffer is deleted
-end
-
 --- Show the terminal window
 --- Creates window if needed, reuses existing buffer
 --- @return integer win Window ID
@@ -290,7 +261,10 @@ function Terminal:show()
   end
 
   -- Handle start_insert option
-  local start_insert = get_opt_with_fallback(self, "start_insert", config.config.start_insert)
+  local start_insert = self.opts.start_insert
+  if start_insert == nil then
+    start_insert = config.config.start_insert
+  end
 
   if start_insert then
     -- Start insert mode in terminal
@@ -307,16 +281,14 @@ function Terminal:hide()
     return
   end
 
-  local win = self.win
-  self.win = nil
-
-  if vim.api.nvim_get_current_win() == win then
+  if vim.api.nvim_get_current_win() == self.win then
     vim.cmd("wincmd p")
   end
 
-  if vim.api.nvim_win_is_valid(win) then
-    vim.api.nvim_win_close(win, true)
+  if vim.api.nvim_win_is_valid(self.win) then
+    vim.api.nvim_win_close(self.win, true)
   end
+  self.win = nil
 end
 
 --- Toggle terminal visibility
@@ -372,7 +344,10 @@ function Terminal:handle_exit()
 
   self.job_id = nil
 
-  local auto_close = get_opt_with_fallback(self, "auto_close", config.config.auto_close)
+  local auto_close = self.opts.auto_close
+  if auto_close == nil then
+    auto_close = config.config.auto_close
+  end
 
   if auto_close then
     vim.schedule(function()
@@ -440,7 +415,10 @@ function Terminal:focus()
 
   vim.api.nvim_set_current_win(self.win)
 
-  local auto_insert = get_opt_with_fallback(self, "auto_insert", config.config.auto_insert)
+  local auto_insert = self.opts.auto_insert
+  if auto_insert == nil then
+    auto_insert = config.config.auto_insert
+  end
 
   if auto_insert then
     vim.cmd("startinsert")
