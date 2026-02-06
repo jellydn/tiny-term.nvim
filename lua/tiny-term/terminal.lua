@@ -98,18 +98,36 @@ function Terminal.new(cmd, opts)
   return self
 end
 
---- Create the terminal buffer and start the process
+--- Create the terminal buffer (without starting the process)
 --- @return integer buf Buffer ID
 function Terminal:create_buffer()
   -- Create a new buffer (unlisted, scratch)
   local buf = vim.api.nvim_create_buf(false, true)
 
-  -- Set buffer options for terminal (before opening the terminal)
+  -- Set buffer options for terminal
   vim.api.nvim_set_option_value("filetype", "tiny_term", { buf = buf })
   vim.api.nvim_set_option_value("bufhidden", "hide", { buf = buf }) -- Keep buffer when window closes
 
-  -- Store buffer reference before starting process (for autocmd closure)
+  -- Store buffer reference
   self.buf = buf
+
+  -- Set up TermClose autocmd for auto-close functionality
+  -- This autocmd fires when the terminal process exits
+  local autocmd_id = vim.api.nvim_create_autocmd("TermClose", {
+    buffer = buf,
+    callback = function()
+      self:handle_exit()
+    end,
+  })
+  self.autocmd_id = autocmd_id
+
+  return buf
+end
+
+--- Start the terminal process in the buffer
+--- Must be called when the buffer is the current buffer
+function Terminal:start_process()
+  local buf = self.buf
 
   -- Build command for terminal
   local cmd = self.cmd or config.config.shell
@@ -126,14 +144,6 @@ function Terminal:create_buffer()
     env = env_list
   end
 
-  -- Save current window and buffer to restore later
-  local current_win = vim.api.nvim_get_current_win()
-  local current_buf = vim.api.nvim_get_current_buf()
-
-  -- Switch to the new buffer and start the terminal
-  -- termopen operates on the current buffer
-  vim.api.nvim_set_current_buf(buf)
-
   -- Change to working directory before starting terminal
   vim.fn.chdir(cwd)
 
@@ -148,27 +158,12 @@ function Terminal:create_buffer()
     end,
   })
 
-  -- Restore previous buffer and window
-  vim.api.nvim_set_current_buf(current_buf)
-  vim.api.nvim_set_current_win(current_win)
-
   if job_id == 0 then
     error("Failed to start terminal: " .. tostring(cmd))
   end
 
   self.job_id = job_id
-
-  -- Set up TermClose autocmd for auto-close functionality
-  -- This autocmd fires when the terminal process exits
-  local autocmd_id = vim.api.nvim_create_autocmd("TermClose", {
-    buffer = buf,
-    callback = function()
-      self:handle_exit()
-    end,
-  })
-  self.autocmd_id = autocmd_id
-
-  return buf
+  self.process_started = true
 end
 
 --- Create a window for the terminal
@@ -278,6 +273,15 @@ function Terminal:show()
   -- Create window if it doesn't exist or is invalid
   if not self:is_visible() then
     self:create_window()
+  end
+
+  -- Start the terminal process if not already started
+  if not self.process_started then
+    -- Switch to the terminal window and start the process
+    local current_win = vim.api.nvim_get_current_win()
+    vim.api.nvim_set_current_win(self.win)
+    self:start_process()
+    vim.api.nvim_set_current_win(current_win)
   end
 
   -- Handle start_insert option
