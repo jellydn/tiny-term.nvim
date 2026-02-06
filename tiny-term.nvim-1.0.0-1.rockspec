@@ -32,5 +32,6 @@ test_dependencies = {
   "nlua",
 }
 test = {
-  type = "builtin",
+  type = "command",
+  test = "test.lua",
 }
