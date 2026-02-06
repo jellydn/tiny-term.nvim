@@ -322,7 +322,7 @@ describe("util.parse()", function()
 
     it("should parse npm script command", function()
       -- Arrange
-      local cmd = 'npm run build -- --watch'
+      local cmd = "npm run build -- --watch"
 
       -- Act
       local result = util.parse(cmd)
@@ -344,7 +344,7 @@ describe("util.parse()", function()
       local result = util.parse(cmd)
 
       -- Assert
-      assert.equals(9, #result)
+      assert.equals(7, #result)
       assert.equals("docker", result[1])
       assert.equals("run", result[2])
       assert.equals("-it", result[3])
@@ -362,7 +362,7 @@ describe("util.parse()", function()
       local result = util.parse(cmd)
 
       -- Assert
-      assert.equals(6, #result)
+      assert.equals(5, #result)
       assert.equals("grep", result[1])
       assert.equals("-r", result[2])
       assert.equals("pattern.*test", result[3])

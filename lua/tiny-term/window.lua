@@ -3,6 +3,63 @@
 
 local M = {}
 
+-- Default keymaps for terminal windows
+local default_keys = {
+  -- Navigation keys (only for split windows, skipped in floats)
+  { "<C-h>", "<C-w>h", mode = "t", desc = "Move to window left" },
+  { "<C-j>", "<C-w>j", mode = "t", desc = "Move to window below" },
+  { "<C-k>", "<C-w>k", mode = "t", desc = "Move to window above" },
+  { "<C-l>", "<C-w>l", mode = "t", desc = "Move to window right" },
+
+  -- q to hide terminal
+  {
+    "q",
+    function()
+      local current_win = vim.api.nvim_get_current_win()
+      local ok, term_id = pcall(vim.api.nvim_win_get_var, current_win, "tiny_term_id")
+      if not (ok and term_id) then
+        return
+      end
+      local terminal = require("tiny-term.terminal")
+      local term = terminal.get(term_id)
+      if term and type(term.hide) == "function" then
+        term:hide()
+      end
+    end,
+    mode = "n",
+    desc = "Hide terminal",
+  },
+
+  -- gf to open file under cursor
+  {
+    "gf",
+    function()
+      local file = vim.fn.expand("<cfile>")
+      if file == "" then
+        return
+      end
+      local current_win = vim.api.nvim_get_current_win()
+      local ok, term_id = pcall(vim.api.nvim_win_get_var, current_win, "tiny_term_id")
+      if ok and term_id then
+        local terminal = require("tiny-term.terminal")
+        local term = terminal.get(term_id)
+        if term and type(term.hide) == "function" then
+          term:hide()
+        end
+      end
+      vim.cmd("e " .. file)
+    end,
+    mode = "n",
+    desc = "Open file under cursor",
+  },
+}
+
+--- Get default keymaps
+--- @return table keys Default keymap definitions
+function M.get_default_keys()
+  return default_keys
+end
+
 -- Track split windows by tabpage and position for stacking.
 -- Enables tmux-like behavior: multiple terminals at the same position reuse one split.
 -- Format: tabpage_id -> position -> window_id
@@ -116,43 +173,9 @@ local function split_at(position, split_size)
   elseif position == "left" then
     split_cmd = "topleft vertical " .. split_size .. "split"
   else
-    -- Default to bottom split for invalid position
     split_cmd = "botright " .. split_size .. "split"
   end
-
-  local ok, err = pcall(vim.cmd, split_cmd)
-  if not ok then
-    error("Failed to create split: " .. tostring(err))
-  end
-end
-
---- Configure window options for terminal windows
---- @param win_id integer Window ID
---- @param opts table Options table
-local function configure_terminal_window(win_id, opts)
-  -- Set buffer if provided
-  if opts.buf then
-    if not vim.api.nvim_buf_is_valid(opts.buf) then
-      error("Invalid buffer provided to configure_terminal_window")
-    end
-    vim.api.nvim_win_set_buf(win_id, opts.buf)
-  end
-
-  -- Store terminal ID on window for keymap access
-  if opts.term then
-    pcall(vim.api.nvim_win_set_var, win_id, "tiny_term_id", opts.term.id)
-  end
-
-  -- Set winhighlight for terminal windows
-  vim.api.nvim_set_option_value("winhighlight", "Normal:TinyTermNormal,FloatBorder:TinyTermBorder", { win = win_id })
-end
-
---- Restore window focus if previous window is valid
---- @param current_win integer The window to restore focus to
-local function restore_window_focus(current_win)
-  if vim.api.nvim_win_is_valid(current_win) then
-    vim.api.nvim_set_current_win(current_win)
-  end
+  vim.cmd(split_cmd)
 end
 
 --- Create a split terminal window
@@ -164,21 +187,22 @@ function M.create_split(opts)
   local win_opts = opts.win or {}
   local position = M.get_window_position(opts)
   local split_size = win_opts.split_size or 15
-
-  -- Save current window
   local current_win = vim.api.nvim_get_current_win()
 
-  -- Create split based on position
   split_at(position, split_size)
-
-  -- Get the new window ID
   local win_id = vim.api.nvim_get_current_win()
 
-  -- Configure the window
-  configure_terminal_window(win_id, opts)
+  if opts.buf then
+    vim.api.nvim_win_set_buf(win_id, opts.buf)
+  end
+  if opts.term then
+    pcall(vim.api.nvim_win_set_var, win_id, "tiny_term_id", opts.term.id)
+  end
+  vim.api.nvim_set_option_value("winhighlight", "Normal:TinyTermNormal,FloatBorder:TinyTermBorder", { win = win_id })
 
-  -- Return to previous window if we had one
-  restore_window_focus(current_win)
+  if vim.api.nvim_win_is_valid(current_win) then
+    vim.api.nvim_set_current_win(current_win)
+  end
 
   return win_id
 end
@@ -260,41 +284,31 @@ end
 function M.stack_in_split(buf, position, opts)
   local win_opts = opts.win or {}
   local split_size = win_opts.split_size or 15
-
-  -- Check if we have an existing valid split at this position
   local existing_win = M.get_split(position)
 
   if existing_win then
-    -- Reuse existing split: replace the buffer
-    if not vim.api.nvim_buf_is_valid(buf) then
-      error("Invalid buffer provided to stack_in_split")
-    end
     vim.api.nvim_win_set_buf(existing_win, buf)
-
-    -- Update terminal ID on window
     if opts.term then
       pcall(vim.api.nvim_win_set_var, existing_win, "tiny_term_id", opts.term.id)
     end
-
     return existing_win
   end
 
-  -- No existing split, create a new one
   local current_win = vim.api.nvim_get_current_win()
-
   split_at(position, split_size)
-
   local win_id = vim.api.nvim_get_current_win()
 
-  -- Set buffer and configure window
-  opts.buf = buf
-  configure_terminal_window(win_id, opts)
+  vim.api.nvim_win_set_buf(win_id, buf)
+  if opts.term then
+    pcall(vim.api.nvim_win_set_var, win_id, "tiny_term_id", opts.term.id)
+  end
+  vim.api.nvim_set_option_value("winhighlight", "Normal:TinyTermNormal,FloatBorder:TinyTermBorder", { win = win_id })
 
-  -- Register this split for future stacking
   M.register_split(position, win_id)
 
-  -- Return to previous window if we had one
-  restore_window_focus(current_win)
+  if vim.api.nvim_win_is_valid(current_win) then
+    vim.api.nvim_set_current_win(current_win)
+  end
 
   return win_id
 end
