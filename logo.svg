@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <!-- Minimal terminal >_ symbol -->
+  <rect x="16" y="24" width="96" height="80" rx="8" fill="none" stroke="currentColor" stroke-width="8"/>
+  <polyline points="36 56 56 72 36 88" fill="none" stroke="currentColor" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+  <line x1="64" y1="88" x2="92" y2="88" stroke="currentColor" stroke-width="8" stroke-linecap="round"/>
+</svg>
