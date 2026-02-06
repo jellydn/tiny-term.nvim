@@ -101,18 +101,18 @@ end
 --- Create the terminal buffer and start the process
 --- @return integer buf Buffer ID
 function Terminal:create_buffer()
-  -- Create a new buffer
+  -- Create a new buffer (unlisted, scratch)
   local buf = vim.api.nvim_create_buf(false, true)
 
-  -- Set buffer options for terminal
-  vim.api.nvim_buf_set_option(buf, "buftype", "terminal")
-  vim.api.nvim_buf_set_option(buf, "filetype", "tiny_term")
-  vim.api.nvim_buf_set_option(buf, "bufhidden", "hide") -- Keep buffer when window closes
+  -- Set buffer options for terminal (before opening the terminal)
+  vim.api.nvim_set_option_value("filetype", "tiny_term", { buf = buf })
+  vim.api.nvim_set_option_value("bufhidden", "hide", { buf = buf }) -- Keep buffer when window closes
 
   -- Store buffer reference before starting process (for autocmd closure)
   self.buf = buf
 
-  -- Change to target directory before starting terminal
+  -- Build command for terminal
+  local cmd = self.cmd or config.config.shell
   local cwd = self.cwd or vim.fn.getcwd()
 
   -- Build environment for terminal
@@ -126,19 +126,34 @@ function Terminal:create_buffer()
     env = env_list
   end
 
-  -- Change to working directory
+  -- Save current window and buffer to restore later
+  local current_win = vim.api.nvim_get_current_win()
+  local current_buf = vim.api.nvim_get_current_buf()
+
+  -- Switch to the new buffer and start the terminal
+  -- termopen operates on the current buffer
+  vim.api.nvim_set_current_buf(buf)
+
+  -- Change to working directory before starting terminal
   vim.fn.chdir(cwd)
 
   -- Start terminal process
-  -- termopen returns job_id on success
-  local cmd = self.cmd or config.config.shell
+  -- termopen returns job_id on success, 0 on failure
   local job_id = vim.fn.termopen(cmd, {
     cwd = cwd,
     env = env,
+    on_exit = function(_, exit_code, _)
+      -- Clean up when process exits
+      self:handle_exit()
+    end,
   })
 
+  -- Restore previous buffer and window
+  vim.api.nvim_set_current_buf(current_buf)
+  vim.api.nvim_set_current_win(current_win)
+
   if job_id == 0 then
-    error("Failed to start terminal: " .. cmd)
+    error("Failed to start terminal: " .. tostring(cmd))
   end
 
   self.job_id = job_id
