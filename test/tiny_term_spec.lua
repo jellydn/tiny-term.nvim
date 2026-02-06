@@ -122,7 +122,7 @@ end
 --- Simulate a terminal buffer being valid
 --- @param term table Terminal object
 local function simulate_valid_buffer(term)
-  term.buf = 999 -- Mock buffer ID
+  term.buf = vim.api.nvim_create_buf(false, true) -- Create a real buffer
   term.process_started = true
 end
 
@@ -259,7 +259,7 @@ describe("util.tid()", function()
     assert.not_equals(id1, id2)
   end)
 
-  it("should ignore environment variables in ID generation (simplified)", function()
+  it("should include environment variables in ID generation", function()
     -- Arrange
     local cmd = "ls"
 
@@ -268,9 +268,22 @@ describe("util.tid()", function()
     local id2 = util.tid(cmd, { env = { FOO = "baz" } })
     local id3 = util.tid(cmd, { env = { FOO = "bar" } })
 
-    -- Assert - env is no longer part of ID (simplified)
-    assert.equals(id1, id2)
+    -- Assert - different env values should produce different IDs
+    assert.not_equals(id1, id2)
+    -- same env values should produce same ID
     assert.equals(id1, id3)
+  end)
+
+  it("should handle nil env in ID generation", function()
+    -- Arrange
+    local cmd = "ls"
+
+    -- Act
+    local id1 = util.tid(cmd, { env = nil })
+    local id2 = util.tid(cmd, {})
+
+    -- Assert - nil env should produce same ID as no env
+    assert.equals(id1, id2)
   end)
 
   it("should generate valid ID for nil command (uses shell)", function()
@@ -356,7 +369,7 @@ describe("tiny-term.get()", function()
 
     -- Assert
     assert.is_nil(term)
-    assert.is_nil(created)
+    assert.is_false(created)
   end)
 
   it("should create different terminals for different options", function()

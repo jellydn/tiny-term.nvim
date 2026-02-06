@@ -55,7 +55,7 @@ function M.get(cmd, opts)
   end
 
   if opts.create == false then
-    return nil, nil
+    return nil, false
   end
 
   local term = terminal.get_or_create(cmd, opts)
@@ -111,8 +111,8 @@ end
 function M.open(cmd, opts)
   opts = opts or {}
 
-  -- Get or create the terminal and show it
-  local term = terminal.get_or_create(cmd, opts)
+  -- Always create a new terminal (bypasses ID reuse)
+  local term = terminal.create_new(cmd, opts)
   term:show()
 
   return term

@@ -28,6 +28,12 @@ local defaults = {
 
     -- Split size in rows/columns
     split_size = 15,
+
+    -- Enable split stacking (tmux-like behavior)
+    stack = true,
+
+    -- Keymaps for terminal windows (nil uses defaults)
+    keys = nil,
   },
 
   -- Behavior options
@@ -45,8 +51,8 @@ local defaults = {
   override_snacks = false,
 }
 
--- Current configuration (set by setup())
-M.config = {}
+-- Current configuration (initialized with defaults)
+M.config = vim.deepcopy(defaults)
 
 ---Setup tiny-term with user options
 ---@param opts? table User configuration options

@@ -26,7 +26,7 @@ end
 
 -- Create user commands
 vim.api.nvim_create_user_command("TinyTerm", function(opts)
-  tiny_term.toggle(opts.fargs[1], {})
+  tiny_term.toggle(opts.args ~= "" and opts.args or nil, {})
 end, {
   nargs = "?",
   desc = "Toggle a tiny terminal",
@@ -34,10 +34,10 @@ end, {
 })
 
 vim.api.nvim_create_user_command("TinyTermOpen", function(opts)
-  tiny_term.open(opts.fargs[1], {})
+  tiny_term.open(opts.args ~= "" and opts.args or nil, {})
 end, {
   nargs = "?",
-  desc = "Open a new tiny terminal",
+  desc = "Open a new terminal (always creates new)",
   complete = cmd_complete,
 })
 

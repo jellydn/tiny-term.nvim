@@ -1,15 +1,35 @@
 local M = {}
 
---- Generate a simple terminal ID based on command, cwd, and count
+--- Generate a simple terminal ID based on command, cwd, env, and count
 --- @param cmd string|nil The command to run in the terminal (nil = shell)
---- @param opts table|nil Options table containing cwd, count, etc.
+--- @param opts table|nil Options table containing cwd, env, count, etc.
 --- @return string id The terminal ID
 function M.tid(cmd, opts)
   opts = opts or {}
   local cmd_key = cmd or vim.o.shell
   local cwd = opts.cwd or vim.fn.getcwd()
   local count = opts.count or vim.v.count1 or 1
-  return string.format("%s|%s|%d", cmd_key, cwd, count)
+
+  local id_parts = { cmd_key, cwd, tostring(count) }
+
+  if opts.env and type(opts.env) == "table" then
+    local env_keys = {}
+    for k, _ in pairs(opts.env) do
+      table.insert(env_keys, k)
+    end
+    table.sort(env_keys)
+
+    local env_parts = {}
+    for _, k in ipairs(env_keys) do
+      table.insert(env_parts, k .. "=" .. tostring(opts.env[k]))
+    end
+
+    if #env_parts > 0 then
+      table.insert(id_parts, table.concat(env_parts, ","))
+    end
+  end
+
+  return table.concat(id_parts, "|")
 end
 
 --- Parse a shell command into a table of arguments

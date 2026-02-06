@@ -279,18 +279,90 @@ end
 --- @param position string Position ("bottom", "top", "left", "right")
 --- @param opts table Options table
 ---   - win.split_size: number (rows for bottom/top, cols for left/right)
+---   - win.stack: boolean Enable stacking (default: true)
+---   - term: TinyTerm.Terminal Terminal object
+--- @return integer win_id Window ID
+--- Configure window with terminal ID and winbar
+--- VSCode-style terminal tab with icon, command name, and close button
+--- @param win_id integer Window ID
+--- @param opts table Options table
+local function configure_terminal_window(win_id, opts)
+  if not opts.term then
+    return
+  end
+
+  pcall(vim.api.nvim_win_set_var, win_id, "tiny_term_id", opts.term.id)
+
+  -- Get display name from command
+  local cmd_display = opts.term.cmd or "shell"
+  -- Truncate long commands
+  if #cmd_display > 30 then
+    cmd_display = cmd_display:sub(1, 27) .. "..."
+  end
+
+  -- Store term ID in window var for click handler
+  vim.api.nvim_win_set_var(win_id, "_tiny_term_close_id", opts.term.id)
+
+  -- Build VSCode-style winbar: icon + command + close button
+  -- Using %@ for click handlers - references vim commands
+  local winbar_text = "%#TabLine# %#TabLineSel#%@v:lua.TinyTermWinbarClick@ "
+
+  -- Add terminal icon (using simple >_ as fallback for maximum compatibility)
+  winbar_text = winbar_text .. ">_ " .. cmd_display .. " "
+
+  -- Add clickable close button
+  winbar_text = winbar_text .. "%@v:lua.TinyTermCloseClick@x%X "
+
+  pcall(vim.api.nvim_set_option_value, "winbar", winbar_text, { win = win_id })
+end
+
+--- Click handler for winbar (focuses terminal)
+function _G.TinyTermWinbarClick()
+  local win_id = vim.api.nvim_get_current_win()
+  local ok, term_id = pcall(vim.api.nvim_win_get_var, win_id, "tiny_term_id")
+  if ok and term_id then
+    local terminal = require("tiny-term.terminal")
+    local term = terminal.get(term_id)
+    if term then
+      vim.api.nvim_set_current_win(term.win)
+      if term.focus then
+        term:focus()
+      end
+    end
+  end
+end
+
+--- Click handler for close button
+function _G.TinyTermCloseClick()
+  local win_id = vim.api.nvim_get_current_win()
+  local ok, term_id = pcall(vim.api.nvim_win_get_var, win_id, "tiny_term_id")
+  if ok and term_id then
+    local terminal = require("tiny-term.terminal")
+    local term = terminal.get(term_id)
+    if term and term.close then
+      term:close()
+    end
+  end
+end
+
+--- Stack a buffer in an existing split window, or create a new split
+--- @param buf integer Buffer ID to stack
+--- @param position string Position ("bottom", "top", "left", "right")
+--- @param opts table Options table
+---   - win.split_size: number (rows for bottom/top, cols for left/right)
+---   - win.stack: boolean Enable stacking (default: true)
 ---   - term: TinyTerm.Terminal Terminal object
 --- @return integer win_id Window ID
 function M.stack_in_split(buf, position, opts)
   local win_opts = opts.win or {}
   local split_size = win_opts.split_size or 15
-  local existing_win = M.get_split(position)
+  local enable_stack = win_opts.stack == nil and true or win_opts.stack
+
+  local existing_win = enable_stack and M.get_split(position)
 
   if existing_win then
     vim.api.nvim_win_set_buf(existing_win, buf)
-    if opts.term then
-      pcall(vim.api.nvim_win_set_var, existing_win, "tiny_term_id", opts.term.id)
-    end
+    configure_terminal_window(existing_win, opts)
     return existing_win
   end
 
@@ -299,9 +371,7 @@ function M.stack_in_split(buf, position, opts)
   local win_id = vim.api.nvim_get_current_win()
 
   vim.api.nvim_win_set_buf(win_id, buf)
-  if opts.term then
-    pcall(vim.api.nvim_win_set_var, win_id, "tiny_term_id", opts.term.id)
-  end
+  configure_terminal_window(win_id, opts)
   vim.api.nvim_set_option_value("winhighlight", "Normal:TinyTermNormal,FloatBorder:TinyTermBorder", { win = win_id })
 
   M.register_split(position, win_id)

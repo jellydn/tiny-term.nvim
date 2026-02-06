@@ -12,15 +12,6 @@ M.terminals = {}
 local Terminal = {}
 Terminal.__index = Terminal
 
---- Helper to resolve option with fallback to config
-local function opt(option_name, opts)
-  local val = opts[option_name]
-  if val ~= nil then
-    return val
-  end
-  return config.config[option_name]
-end
-
 --- Create a new terminal object
 --- @param cmd string|nil Command to run (nil = shell)
 --- @param opts table|nil Options table
@@ -31,9 +22,9 @@ function Terminal.new(cmd, opts)
 
   local interactive = opts.interactive == nil and config.config.interactive ~= false
   if interactive then
-    opts.start_insert = opts.start_insert == nil and true or opts.start_insert
-    opts.auto_insert = opts.auto_insert == nil and true or opts.auto_insert
-    opts.auto_close = opts.auto_close == nil and true or opts.auto_close
+    opts.start_insert = opts.start_insert ~= false
+    opts.auto_insert = opts.auto_insert ~= false
+    opts.auto_close = opts.auto_close ~= false
   end
 
   local self = setmetatable({
@@ -111,14 +102,22 @@ function Terminal:start_process()
   local cmd = self.cmd or config.config.shell
   local cwd = self.cwd or vim.fn.getcwd()
 
-  local cmd_list = type(cmd) == "table" and cmd or { "sh", "-c", cmd }
+  local cmd_list
+  if type(cmd) == "table" then
+    cmd_list = cmd
+  else
+    local shell = config.config.shell
+    local shellcmdflag = vim.o.shellcmdflag or "-c"
+    cmd_list = { shell, shellcmdflag, cmd }
+  end
 
   local job_id = vim.fn.jobstart(cmd_list, {
     cwd = cwd,
     env = self.env,
     term = true,
-    on_exit = function(_, exit_code, _)
-      self:handle_exit()
+    on_exit = function()
+      self.exited = true
+      self.job_id = nil
     end,
   })
 
@@ -136,7 +135,7 @@ end
 --- Create a window for the terminal
 --- @return integer win Window ID
 function Terminal:create_window()
-  local opts = vim.tbl_deep_extend("force", self.opts, {
+  local opts = vim.tbl_deep_extend("force", self.opts or {}, {
     buf = self.buf,
     cmd = self.cmd,
     term = self,
@@ -160,33 +159,27 @@ function Terminal:setup_keymaps()
     return
   end
 
-  local keys = window.get_default_keys()
+  local opts = self.opts or {}
+  local win_opts = opts.win or {}
+  local keys = win_opts.keys or config.config.win.keys or window.get_default_keys()
   local is_floating = self:is_floating()
 
   for _, keymap in ipairs(keys) do
-    if keymap[1] == false then
-      goto continue
+    if keymap[1] ~= false then
+      local mode = keymap.mode or "n"
+      local lhs = keymap[1]
+      local rhs = keymap[2]
+
+      local is_nav_key = lhs == "<C-h>" or lhs == "<C-j>" or lhs == "<C-k>" or lhs == "<C-l>"
+      if not (is_floating and is_nav_key) then
+        vim.keymap.set(mode, lhs, rhs, {
+          desc = keymap.desc,
+          buffer = self.buf,
+          noremap = true,
+          silent = true,
+        })
+      end
     end
-
-    local mode = keymap.mode or "n"
-    local lhs = keymap[1]
-    local rhs = keymap[2]
-
-    local is_nav_key = lhs == "<C-h>" or lhs == "<C-j>" or lhs == "<C-k>" or lhs == "<C-l>"
-    if is_floating and is_nav_key then
-      goto continue
-    end
-
-    local opts = {
-      desc = keymap.desc,
-      buffer = self.buf,
-      noremap = true,
-      silent = true,
-    }
-
-    vim.keymap.set(mode, lhs, rhs, opts)
-
-    ::continue::
   end
 
   vim.api.nvim_buf_set_keymap(self.buf, "t", "<Esc>", "", {
@@ -221,7 +214,11 @@ function Terminal:show()
     end)
   end
 
-  if opt("start_insert", self.opts) then
+  local start_insert = (self.opts or {}).start_insert
+  if start_insert == nil then
+    start_insert = config.config.start_insert
+  end
+  if start_insert then
     vim.api.nvim_set_current_win(self.win)
     vim.cmd("startinsert")
   end
@@ -301,7 +298,11 @@ function Terminal:handle_exit()
 
   self.job_id = nil
 
-  if opt("auto_close", self.opts) then
+  local auto_close = (self.opts or {}).auto_close
+  if auto_close == nil then
+    auto_close = config.config.auto_close
+  end
+  if auto_close then
     vim.schedule(function()
       self:hide()
       if self:buf_valid() then
@@ -329,7 +330,6 @@ function Terminal:is_visible()
     return false
   end
 
-  -- Check if window is in the current tabpage
   local current_tab = vim.api.nvim_get_current_tabpage()
   local win_tab = vim.api.nvim_win_get_tabpage(self.win)
 
@@ -349,9 +349,6 @@ function Terminal:buf_valid()
   if self.buf == nil then
     return false
   end
-  if self.process_started then
-    return true
-  end
   return vim.api.nvim_buf_is_valid(self.buf)
 end
 
@@ -363,7 +360,11 @@ function Terminal:focus()
 
   vim.api.nvim_set_current_win(self.win)
 
-  if opt("auto_insert", self.opts) then
+  local auto_insert = (self.opts or {}).auto_insert
+  if auto_insert == nil then
+    auto_insert = config.config.auto_insert
+  end
+  if auto_insert then
     vim.cmd("startinsert")
   end
 end
@@ -384,6 +385,26 @@ function M.get_or_create(cmd, opts)
 
   local term = Terminal.new(cmd, opts)
   M.terminals[id] = term
+
+  return term
+end
+
+--- Create a new terminal (always creates, bypasses ID reuse)
+--- @param cmd string|nil Command to run (nil = shell)
+--- @param opts table|nil Options table
+--- @return TinyTerm.Terminal term Terminal object
+function M.create_new(cmd, opts)
+  opts = opts or {}
+
+  local base_id = util.tid(cmd, opts)
+  -- Use a counter for uniqueness instead of random numbers
+  local counter = M._create_counter or 0
+  M._create_counter = counter + 1
+  local unique_id = base_id .. "|" .. tostring(os.time()) .. "|" .. tostring(counter)
+
+  local term = Terminal.new(cmd, opts)
+  term.id = unique_id
+  M.terminals[unique_id] = term
 
   return term
 end

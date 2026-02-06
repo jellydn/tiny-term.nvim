@@ -10,18 +10,17 @@
 
 A minimal, standalone Neovim 0.11+ terminal plugin that provides floating and split terminal windows with toggle support. Serves as a drop-in replacement for `Snacks.terminal` with the same API shape, so existing integrations work with minimal changes.
 
-<!-- TODO: Add demo GIF/image -->
-[![Demo](https://i.gyazo.com/placeholder.gif)](https://gyazo.com/placeholder)
+![Demo](https://gyazo.com/a1812139c96322b51813e39b9c3faedb.gif)
 
 ## ✨ Features
 
 - 🪟 **Floating and split terminals** - Choose between floating windows or split layouts (bottom, top, left, right)
 - 🔄 **Toggle support** - Quickly show/hide terminals with keymaps like `<C-/>`
-- 🔢 **Multiple terminals** - Manage multiple terminals with stable IDs based on command, cwd, and count
+- 🔢 **Multiple terminals** - Manage multiple terminals with stable IDs based on command, cwd, env, and count
 - ⌨️ **Double-Escape to normal mode** - Single `<Esc>` passes through, double exits to normal mode
 - 🎯 **Snacks.terminal API compatible** - Drop-in replacement with `toggle()`, `open()`, `get()`, `list()`
 - 📚 **Window stacking** - Multiple split terminals at the same position stack together
-- 🏷️ **Winbar labels** - Visual labels for stacked terminals
+- 🏷️ **VSCode-style winbar** - Terminal tabs with icon, command name, and clickable close button (✕)
 - 🚪 **Auto-close on exit** - Terminal windows close automatically when processes exit
 - ⚡ **Zero dependencies** - Lightweight and built for Neovim 0.11+
 
@@ -123,13 +122,13 @@ end, { desc = "Toggle terminal with count" })
 
 ## ⌨️ Commands
 
-| Command | Description |
-| --------------------- | -------------------------------------------- |
-| `:TinyTerm` | Toggle shell terminal |
-| `:TinyTerm {cmd}` | Toggle terminal running `{cmd}` |
+| Command               | Description                              |
+| --------------------- | ---------------------------------------- |
+| `:TinyTerm`           | Toggle shell terminal                    |
+| `:TinyTerm {cmd}`     | Toggle terminal running `{cmd}`          |
 | `:TinyTermOpen {cmd}` | Open new terminal (always creates/shows) |
-| `:TinyTermClose` | Close current terminal |
-| `:TinyTermList` | List all active terminals |
+| `:TinyTermClose`      | Close current terminal                   |
+| `:TinyTermList`       | List all active terminals                |
 
 ## ⚙️ Configuration
 
@@ -153,12 +152,12 @@ require("tiny-term").setup({
     -- Split size in rows/columns
     split_size = 15,
 
-    -- Default keymaps for terminal windows
-    keys = {
-      { "<Esc><Esc>", "<C-\\><C-n>", mode = "t", desc = "Enter normal mode" },
-      { "q", function() ... end, mode = "n", desc = "Hide terminal" },
-      { "gf", function() ... end, mode = "n", desc = "Open file under cursor" },
-    },
+    -- Enable split stacking (tmux-like behavior)
+    stack = true,
+
+    -- Default keymaps for terminal windows (nil uses built-in defaults)
+    -- Override to customize or set to false to disable specific mappings
+    keys = nil,
   },
 
   -- Start in insert mode when terminal opens
@@ -181,12 +180,14 @@ require("tiny-term").setup({
 ### Terminal IDs
 
 Terminals are identified by a deterministic ID based on:
+
 - Command (or shell if nil)
-- Current working directory
-- Environment variables
+- Current working directory (cwd)
+- Environment variables (env)
 - Vim count (`vim.v.count1`)
 
 This allows toggling multiple terminals:
+
 ```lua
 -- Terminal #1 (default)
 require("tiny-term").toggle()
@@ -196,6 +197,9 @@ require("tiny-term").toggle(nil, { count = 2 })
 
 -- Terminal for specific directory
 require("tiny-term").toggle(nil, { cwd = "/path/to/project" })
+
+-- Terminal with specific environment
+require("tiny-term").toggle("npm run dev", { env = { NODE_ENV = "development" } })
 ```
 
 ## 🔧 API Reference
@@ -290,23 +294,25 @@ require("tiny-term").override_snacks()
 
 Terminal objects returned by the API have the following methods:
 
-| Method | Description |
-| ------ | ----------- |
-| `term:show()` | Show terminal window (creates if needed) |
-| `term:hide()` | Hide terminal window (keeps buffer/process) |
-| `term:toggle()` | Toggle visibility based on current state |
-| `term:close()` | Kill process and delete buffer |
-| `term:is_floating()` | Returns `true` if terminal window is floating |
-| `term:is_visible()` | Returns `true` if terminal has valid visible window |
-| `term:buf_valid()` | Returns `true` if terminal buffer is still valid |
-| `term:focus()` | Focus terminal window and enter insert mode |
+| Method               | Description                                         |
+| -------------------- | --------------------------------------------------- |
+| `term:show()`        | Show terminal window (creates if needed)            |
+| `term:hide()`        | Hide terminal window (keeps buffer/process)         |
+| `term:toggle()`      | Toggle visibility based on current state            |
+| `term:close()`       | Kill process and delete buffer                      |
+| `term:is_floating()` | Returns `true` if terminal window is floating       |
+| `term:is_visible()`  | Returns `true` if terminal has valid visible window |
+| `term:buf_valid()`   | Returns `true` if terminal buffer is still valid    |
+| `term:focus()`       | Focus terminal window and enter insert mode         |
 
 ## 🔧 How It Works
 
 - **Buffer management**: Uses `bufhidden = "hide"` so terminal buffers persist when windows close
 - **Window tracking**: Windows are tracked separately from buffers; a terminal can exist without a window
+- **Split stacking**: Multiple terminals at the same position share one split with VSCode-style winbar tabs featuring clickable close buttons
+- **Keymaps**: Configurable terminal keymaps including double-esc detection using `vim.uv.new_timer()`
 - **Neovim 0.11 features**: Leverages `'winborder'`, improved `nvim_open_win()`, terminal reflow, and `hl-StatusLineTerm`
-- **Double-Escape**: Uses `vim.uv.new_timer()` to detect double-esc within 200ms
+- **Cross-platform**: Uses configured shell (`vim.o.shell`) for running commands
 
 ## 👤 Author
 
