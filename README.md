@@ -10,7 +10,7 @@
 
 A minimal, standalone Neovim 0.11+ terminal plugin that provides floating and split terminal windows with toggle support. Serves as a drop-in replacement for `Snacks.terminal` with the same API shape, so existing integrations work with minimal changes.
 
-![Demo](https://gyazo.com/a1812139c96322b51813e39b9c3faedb.gif)
+![Demo](https://gyazo.com/084d884839a3e3e84525a2d527ecec6b.gif)
 
 ## ✨ Features
 
