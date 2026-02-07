@@ -1,6 +1,3 @@
---- Terminal object and buffer management for tiny-term.nvim
--- Handles terminal lifecycle, buffer management, and window operations
-
 local M = {}
 
 local config = require("tiny-term.config")
@@ -12,10 +9,9 @@ M.terminals = {}
 local Terminal = {}
 Terminal.__index = Terminal
 
---- Create a new terminal object
---- @param cmd string|nil Command to run (nil = shell)
---- @param opts table|nil Options table
---- @return TinyTerm.Terminal term Terminal object
+---@param cmd string|nil
+---@param opts table|nil
+---@return TinyTerm.Terminal
 function Terminal.new(cmd, opts)
   opts = opts or {}
   local id = util.tid(cmd, opts)
@@ -45,8 +41,32 @@ function Terminal.new(cmd, opts)
   return self
 end
 
---- Handle double-esc keypress in terminal mode
---- @return boolean handled True if we should exit to normal mode
+local function _refresh_splits_if_needed(term)
+  if not term.win or type(term.win) ~= "number" then
+    return
+  end
+
+  local win_id = term.win
+  local window = require("tiny-term.window")
+  window.unregister_terminal_from_split(win_id, term.id)
+  local remaining = window.get_split_terminals(win_id)
+  if #remaining == 0 then
+    return
+  end
+
+  local terminal = require("tiny-term.terminal")
+  local next_term = terminal.get(remaining[1])
+  if not next_term then
+    return
+  end
+
+  vim.schedule(function()
+    if type(win_id) == "number" and vim.api.nvim_win_is_valid(win_id) then
+      window.switch_to_terminal(win_id, remaining[1])
+    end
+  end)
+end
+
 function Terminal:handle_double_esc()
   self.esc_count = self.esc_count + 1
 
@@ -75,8 +95,6 @@ function Terminal:handle_double_esc()
   return false
 end
 
---- Create the terminal buffer (without starting the process)
---- @return integer buf Buffer ID
 function Terminal:create_buffer()
   local buf = vim.api.nvim_create_buf(false, true)
 
@@ -96,8 +114,6 @@ function Terminal:create_buffer()
   return buf
 end
 
---- Start the terminal process in the buffer
---- Must be called when the buffer is the current buffer
 function Terminal:start_process()
   local cmd = self.cmd or config.config.shell
   local cwd = self.cwd or vim.fn.getcwd()
@@ -132,8 +148,6 @@ function Terminal:start_process()
   self.process_started = true
 end
 
---- Create a window for the terminal
---- @return integer win Window ID
 function Terminal:create_window()
   local opts = vim.tbl_deep_extend("force", self.opts or {}, {
     buf = self.buf,
@@ -153,7 +167,6 @@ function Terminal:create_window()
   return self.win
 end
 
---- Set up keymaps for the terminal window
 function Terminal:setup_keymaps()
   if not self.win or not vim.api.nvim_win_is_valid(self.win) then
     return
@@ -163,6 +176,7 @@ function Terminal:setup_keymaps()
   local win_opts = opts.win or {}
   local keys = win_opts.keys or config.config.win.keys or window.get_default_keys()
   local is_floating = self:is_floating()
+  local nav_keys = { ["<C-h>"] = true, ["<C-j>"] = true, ["<C-k>"] = true, ["<C-l>"] = true }
 
   for _, keymap in ipairs(keys) do
     if keymap[1] ~= false then
@@ -170,8 +184,7 @@ function Terminal:setup_keymaps()
       local lhs = keymap[1]
       local rhs = keymap[2]
 
-      local is_nav_key = lhs == "<C-h>" or lhs == "<C-j>" or lhs == "<C-k>" or lhs == "<C-l>"
-      if not (is_floating and is_nav_key) then
+      if not (is_floating and nav_keys[lhs]) then
         vim.keymap.set(mode, lhs, rhs, {
           desc = keymap.desc,
           buffer = self.buf,
@@ -196,9 +209,6 @@ function Terminal:setup_keymaps()
   })
 end
 
---- Show the terminal window
---- Creates window if needed, reuses existing buffer
---- @return integer win Window ID
 function Terminal:show()
   if not self:buf_valid() then
     self:create_buffer()
@@ -226,11 +236,12 @@ function Terminal:show()
   return self.win
 end
 
---- Hide the terminal window (closes window, keeps buffer/process alive)
 function Terminal:hide()
   if not self:is_visible() then
     return
   end
+
+  _refresh_splits_if_needed(self)
 
   if vim.api.nvim_get_current_win() == self.win then
     vim.cmd("wincmd p")
@@ -240,7 +251,6 @@ function Terminal:hide()
   self.win = nil
 end
 
---- Toggle terminal visibility
 function Terminal:toggle()
   if self:is_visible() then
     self:hide()
@@ -249,7 +259,6 @@ function Terminal:toggle()
   end
 end
 
---- Close the terminal (kills process, deletes buffer)
 function Terminal:close()
   self.exited = true
 
@@ -269,6 +278,8 @@ function Terminal:close()
     self.job_id = nil
   end
 
+  _refresh_splits_if_needed(self)
+
   self:hide()
 
   if self:buf_valid() then
@@ -279,7 +290,6 @@ function Terminal:close()
   M.terminals[self.id] = nil
 end
 
---- Handle terminal process exit (called by TermClose autocmd)
 function Terminal:handle_exit()
   if self.exited then
     return
@@ -314,8 +324,6 @@ function Terminal:handle_exit()
   end
 end
 
---- Check if the terminal window is floating
---- @return boolean is_floating True if window is floating
 function Terminal:is_floating()
   if not self.win or not vim.api.nvim_win_is_valid(self.win) then
     return false
@@ -323,8 +331,6 @@ function Terminal:is_floating()
   return window.is_floating(self.win)
 end
 
---- Check if the terminal window is visible
---- @return boolean is_visible True if window is valid and visible
 function Terminal:is_visible()
   if not self.win or not vim.api.nvim_win_is_valid(self.win) then
     return false
@@ -336,15 +342,10 @@ function Terminal:is_visible()
   return win_tab == current_tab
 end
 
---- Check if the terminal window is on the current tabpage
---- Alias for is_visible() - matches Snacks.terminal API
---- @return boolean on_current_tab True if window is on current tabpage
 function Terminal:on_current_tab()
   return self:is_visible()
 end
 
---- Check if the terminal buffer is valid
---- @return boolean is_valid True if buffer is still valid
 function Terminal:buf_valid()
   if self.buf == nil then
     return false
@@ -352,7 +353,6 @@ function Terminal:buf_valid()
   return vim.api.nvim_buf_is_valid(self.buf)
 end
 
---- Focus the terminal window
 function Terminal:focus()
   if not self:is_visible() then
     return
@@ -369,10 +369,6 @@ function Terminal:focus()
   end
 end
 
---- Get or create a terminal for the given command and options
---- @param cmd string|nil Command to run (nil = shell)
---- @param opts table|nil Options table
---- @return TinyTerm.Terminal term Terminal object
 function M.get_or_create(cmd, opts)
   opts = opts or {}
 
@@ -389,10 +385,6 @@ function M.get_or_create(cmd, opts)
   return term
 end
 
---- Create a new terminal (always creates, bypasses ID reuse)
---- @param cmd string|nil Command to run (nil = shell)
---- @param opts table|nil Options table
---- @return TinyTerm.Terminal term Terminal object
 function M.create_new(cmd, opts)
   opts = opts or {}
 
@@ -409,8 +401,6 @@ function M.create_new(cmd, opts)
   return term
 end
 
---- List all active terminals
---- @return table terminals Table of terminal objects
 function M.list()
   local active = {}
   for id, term in pairs(M.terminals) do
@@ -421,14 +411,10 @@ function M.list()
   return active
 end
 
---- Get a terminal by ID
---- @param id string Terminal ID
---- @return TinyTerm.Terminal|nil term Terminal object or nil
 function M.get(id)
   return M.terminals[id]
 end
 
---- Close all terminals
 function M.close_all()
   for id, term in pairs(M.terminals) do
     if term:buf_valid() then

@@ -1,17 +1,10 @@
---- Window creation utilities for tiny-term.nvim
--- Handles floating and split window creation with Neovim 0.11+ support
-
 local M = {}
 
--- Default keymaps for terminal windows
 local default_keys = {
-  -- Navigation keys (only for split windows, skipped in floats)
   { "<C-h>", "<C-w>h", mode = "t", desc = "Move to window left" },
   { "<C-j>", "<C-w>j", mode = "t", desc = "Move to window below" },
   { "<C-k>", "<C-w>k", mode = "t", desc = "Move to window above" },
   { "<C-l>", "<C-w>l", mode = "t", desc = "Move to window right" },
-
-  -- q to hide terminal
   {
     "q",
     function()
@@ -22,15 +15,13 @@ local default_keys = {
       end
       local terminal = require("tiny-term.terminal")
       local term = terminal.get(term_id)
-      if term and type(term.hide) == "function" then
+      if term then
         term:hide()
       end
     end,
     mode = "n",
     desc = "Hide terminal",
   },
-
-  -- gf to open file under cursor
   {
     "gf",
     function()
@@ -43,7 +34,7 @@ local default_keys = {
       if ok and term_id then
         local terminal = require("tiny-term.terminal")
         local term = terminal.get(term_id)
-        if term and type(term.hide) == "function" then
+        if term then
           term:hide()
         end
       end
@@ -54,22 +45,14 @@ local default_keys = {
   },
 }
 
---- Get default keymaps
---- @return table keys Default keymap definitions
 function M.get_default_keys()
   return default_keys
 end
 
--- Track split windows by tabpage and position for stacking.
--- Enables tmux-like behavior: multiple terminals at the same position reuse one split.
--- Format: tabpage_id -> position -> window_id
--- Positions: "bottom", "top", "left", "right"
 local split_windows = {}
+local split_terminals = {}
+local split_active_term = {}
 
---- Get the window position string from options
---- Default: cmd provided → float, no cmd (shell) → bottom split
---- @param opts table Options table containing win config and cmd
---- @return string position Position string ("float", "bottom", "top", "left", "right")
 function M.get_window_position(opts)
   local win_opts = opts.win or {}
   local position = win_opts.position
@@ -81,39 +64,19 @@ function M.get_window_position(opts)
   return position
 end
 
---- Create a floating terminal window
---- @param opts table Options table
----   - win.width: number (fraction of editor width, default 0.8)
----   - win.height: number (fraction of editor height, default 0.8)
----   - win.border: string|table|nil (border style, nil to use 'winborder')
---- @return integer win_id Window ID
 function M.create_float(opts)
   local win_opts = opts.win or {}
   local width = win_opts.width or 0.8
   local height = win_opts.height or 0.8
 
-  -- Get editor dimensions
   local editor_width = vim.o.columns
   local editor_height = vim.o.lines
-
-  -- Calculate window dimensions
   local win_width = math.floor(editor_width * width)
   local win_height = math.floor(editor_height * height)
-
-  -- Calculate centered position
   local row = math.floor((editor_height - win_height) / 2)
   local col = math.floor((editor_width - win_width) / 2)
 
-  -- Determine border style
-  -- Neovim 0.11+: Use vim.o.winborder as default, explicit opts.win.border overrides
   local border = win_opts.border
-  if border == nil then
-    -- Use global 'winborder' option (Neovim 0.11+)
-    -- In Neovim 0.11, nil border means "use global setting"
-    border = nil
-  end
-
-  -- Create floating window configuration
   local config = {
     relative = "editor",
     width = win_width,
@@ -122,18 +85,14 @@ function M.create_float(opts)
     col = col,
     style = "minimal",
     border = border,
-    -- Neovim 0.11+: mouse field for better interaction
     mouse = true,
   }
 
-  -- Create the buffer if not provided
   local buf = opts.buf or vim.api.nvim_create_buf(false, true)
   if not buf or buf == 0 then
     error("Failed to create terminal buffer")
   end
 
-  -- Create the floating window
-  -- nvim_open_win returns window ID
   local win_id = vim.api.nvim_open_win(buf, true, config)
   if not win_id or win_id == 0 then
     error("Failed to create floating window")
@@ -141,8 +100,6 @@ function M.create_float(opts)
   if not vim.api.nvim_win_is_valid(win_id) then
     error("Window became invalid immediately after creation")
   end
-
-  -- Set window options for terminal
   vim.api.nvim_set_option_value("wrap", false, { win = win_id })
   vim.api.nvim_set_option_value("signcolumn", "no", { win = win_id })
   vim.api.nvim_set_option_value(
@@ -159,9 +116,6 @@ function M.create_float(opts)
   return win_id
 end
 
---- Execute the split command for a given position
---- @param position string Position ("bottom", "top", "left", "right")
---- @param split_size number Size in rows/columns
 local function split_at(position, split_size)
   local split_cmd
   if position == "bottom" then
@@ -178,11 +132,6 @@ local function split_at(position, split_size)
   vim.cmd(split_cmd)
 end
 
---- Create a split terminal window
---- @param opts table Options table
----   - win.position: string ("bottom", "top", "left", "right")
----   - win.split_size: number (rows for bottom/top, cols for left/right)
---- @return integer win_id Window ID
 function M.create_split(opts)
   local win_opts = opts.win or {}
   local position = M.get_window_position(opts)
@@ -207,22 +156,15 @@ function M.create_split(opts)
   return win_id
 end
 
---- Check if a window is a floating window
---- @param win_id integer Window ID
---- @return boolean is_floating True if window is floating
 function M.is_floating(win_id)
   if not vim.api.nvim_win_is_valid(win_id) then
     return false
   end
 
   local config = vim.api.nvim_win_get_config(win_id)
-  -- Floating windows have a 'relative' field in their config
   return config.relative ~= nil and config.relative ~= ""
 end
 
---- Create a window (float or split) based on options
---- @param opts table Options table
---- @return integer win_id Window ID
 function M.create_window(opts)
   local position = M.get_window_position(opts)
 
@@ -233,11 +175,7 @@ function M.create_window(opts)
   end
 end
 
---- Register a split window for stacking at a given position
---- @param position string Position ("bottom", "top", "left", "right")
---- @param win_id integer Window ID
 function M.register_split(position, win_id)
-  -- Check if window is valid before getting tabpage
   if not vim.api.nvim_win_is_valid(win_id) then
     return
   end
@@ -247,11 +185,80 @@ function M.register_split(position, win_id)
     split_windows[tabpage] = {}
   end
   split_windows[tabpage][position] = win_id
+
+  if not split_terminals[win_id] then
+    split_terminals[win_id] = {}
+  end
 end
 
---- Get the existing split window for a position, if valid
---- @param position string Position ("bottom", "top", "left", "right")
---- @return integer|nil win_id Window ID or nil if no valid split exists
+function M.register_terminal_in_split(win_id, term_id)
+  if not vim.api.nvim_win_is_valid(win_id) then
+    return
+  end
+
+  if not split_terminals[win_id] then
+    split_terminals[win_id] = {}
+  end
+
+  for _, id in ipairs(split_terminals[win_id]) do
+    if id == term_id then
+      split_active_term[win_id] = term_id
+      return
+    end
+  end
+
+  table.insert(split_terminals[win_id], term_id)
+  split_active_term[win_id] = term_id
+end
+
+function M.unregister_terminal_from_split(win_id, term_id)
+  if not split_terminals[win_id] then
+    return
+  end
+
+  local terms = split_terminals[win_id]
+  for i, id in ipairs(terms) do
+    if id == term_id then
+      table.remove(terms, i)
+      break
+    end
+  end
+
+  if split_active_term[win_id] == term_id then
+    split_active_term[win_id] = terms[1]
+  end
+
+  if #terms == 0 then
+    split_terminals[win_id] = nil
+    split_active_term[win_id] = nil
+  end
+end
+
+function M.get_split_terminals(win_id)
+  return split_terminals[win_id] or {}
+end
+
+function M.switch_to_terminal(win_id, term_id)
+  if not vim.api.nvim_win_is_valid(win_id) then
+    return
+  end
+
+  local terminal = require("tiny-term.terminal")
+  local term = terminal.get(term_id)
+  if not term or not term.buf then
+    return
+  end
+
+  term.win = win_id
+  vim.api.nvim_win_set_buf(win_id, term.buf)
+  split_active_term[win_id] = term_id
+  configure_terminal_window(win_id, { term = term })
+  vim.api.nvim_set_current_win(win_id)
+  if term.focus then
+    term:focus()
+  end
+end
+
 function M.get_split(position)
   local current_tab = vim.api.nvim_get_current_tabpage()
   local tab_windows = split_windows[current_tab]
@@ -261,102 +268,144 @@ function M.get_split(position)
 
   local win_id = tab_windows[position]
 
-  -- Check if window is still valid
   if win_id and vim.api.nvim_win_is_valid(win_id) then
-    -- Verify it's not a floating window
     if not M.is_floating(win_id) then
       return win_id
     end
   end
 
-  -- Clear invalid entries
   tab_windows[position] = nil
   return nil
 end
 
---- Stack a buffer in an existing split window, or create a new split
---- @param buf integer Buffer ID to stack
---- @param position string Position ("bottom", "top", "left", "right")
---- @param opts table Options table
----   - win.split_size: number (rows for bottom/top, cols for left/right)
----   - win.stack: boolean Enable stacking (default: true)
----   - term: TinyTerm.Terminal Terminal object
---- @return integer win_id Window ID
---- Configure window with terminal ID and winbar
---- VSCode-style terminal tab with icon, command name, and close button
---- @param win_id integer Window ID
---- @param opts table Options table
-local function configure_terminal_window(win_id, opts)
+function configure_terminal_window(win_id, opts)
   if not opts.term then
     return
   end
 
   pcall(vim.api.nvim_win_set_var, win_id, "tiny_term_id", opts.term.id)
+  M.register_terminal_in_split(win_id, opts.term.id)
+  local terms = M.get_split_terminals(win_id)
+  local active_term_id = split_active_term[win_id] or opts.term.id
 
-  -- Get display name from command
-  local cmd_display = opts.term.cmd or "shell"
-  -- Truncate long commands
-  if #cmd_display > 30 then
-    cmd_display = cmd_display:sub(1, 27) .. "..."
-  end
+  pcall(vim.api.nvim_win_set_var, win_id, "_tiny_term_tab_ids", terms)
 
-  -- Store term ID in window var for click handler
-  vim.api.nvim_win_set_var(win_id, "_tiny_term_close_id", opts.term.id)
+  local winbar_parts = {}
+  table.insert(winbar_parts, "%#TabLineFill# ")
 
-  -- Build VSCode-style winbar: icon + command + close button
-  -- Using %@ for click handlers - references vim commands
-  local winbar_text = "%#TabLine# %#TabLineSel#%@v:lua.TinyTermWinbarClick@ "
-
-  -- Add terminal icon (using simple >_ as fallback for maximum compatibility)
-  winbar_text = winbar_text .. ">_ " .. cmd_display .. " "
-
-  -- Add clickable close button
-  winbar_text = winbar_text .. "%@v:lua.TinyTermCloseClick@x%X "
-
-  pcall(vim.api.nvim_set_option_value, "winbar", winbar_text, { win = win_id })
-end
-
---- Click handler for winbar (focuses terminal)
-function _G.TinyTermWinbarClick()
-  local win_id = vim.api.nvim_get_current_win()
-  local ok, term_id = pcall(vim.api.nvim_win_get_var, win_id, "tiny_term_id")
-  if ok and term_id then
+  for idx, term_id in ipairs(terms) do
     local terminal = require("tiny-term.terminal")
     local term = terminal.get(term_id)
     if term then
-      vim.api.nvim_set_current_win(term.win)
-      if term.focus then
-        term:focus()
+      local is_active = term_id == active_term_id
+      local cmd_display = term.cmd or "shell"
+
+      if #cmd_display > 15 then
+        cmd_display = cmd_display:sub(1, 12) .. "..."
+      end
+
+      local tab_text = " " .. idx .. " >_ " .. cmd_display .. " "
+
+      if is_active then
+        table.insert(winbar_parts, "%#TabLineSel#")
+      else
+        table.insert(winbar_parts, "%#TabLine#")
+      end
+
+      table.insert(winbar_parts, "%" .. idx .. "@v:lua.TinyTermTabClick@")
+      table.insert(winbar_parts, tab_text)
+      table.insert(winbar_parts, "%X")
+      table.insert(winbar_parts, "%" .. idx .. "@v:lua.TinyTermTabCloseClick@")
+      table.insert(winbar_parts, " ✕ ")
+      table.insert(winbar_parts, "%X")
+    end
+  end
+
+  table.insert(winbar_parts, "%#TabLineFill#")
+
+  local winbar_text = table.concat(winbar_parts, "")
+  pcall(vim.api.nvim_set_option_value, "winbar", winbar_text, { win = win_id })
+end
+
+function _G.TinyTermTabClick(tab_idx)
+  local win_id = vim.api.nvim_get_current_win()
+  if not vim.api.nvim_win_is_valid(win_id) or not tab_idx or tab_idx < 1 then
+    return
+  end
+
+  local ok, terms = pcall(vim.api.nvim_win_get_var, win_id, "_tiny_term_tab_ids")
+  if not ok or not terms or not terms[tab_idx] then
+    return
+  end
+
+  local term_id = terms[tab_idx]
+  M.switch_to_terminal(win_id, term_id)
+end
+
+function _G.TinyTermTabCloseClick(tab_idx)
+  local win_id = vim.api.nvim_get_current_win()
+  if not vim.api.nvim_win_is_valid(win_id) or not tab_idx or tab_idx < 1 then
+    return
+  end
+
+  local ok, terms = pcall(vim.api.nvim_win_get_var, win_id, "_tiny_term_tab_ids")
+  if not ok or not terms or not terms[tab_idx] then
+    return
+  end
+
+  local term_id = terms[tab_idx]
+  local terminal = require("tiny-term.terminal")
+  local term = terminal.get(term_id)
+
+  if not term then
+    return
+  end
+
+  M.unregister_terminal_from_split(win_id, term_id)
+  local remaining = M.get_split_terminals(win_id)
+
+  if #remaining > 0 then
+    local next_term_id = remaining[1]
+    local next_term = terminal.get(next_term_id)
+    if next_term and next_term.buf then
+      vim.api.nvim_win_set_buf(win_id, next_term.buf)
+      split_active_term[win_id] = next_term_id
+      configure_terminal_window(win_id, { term = next_term })
+      vim.api.nvim_set_current_win(win_id)
+      if next_term.focus then
+        next_term:focus()
       end
     end
+    term.win = nil
+  else
+    pcall(vim.api.nvim_win_close, win_id, true)
   end
+
+  term.exited = true
+  if term.esc_timer then
+    term.esc_timer:close()
+    term.esc_timer = nil
+  end
+  term.esc_count = 0
+  if term.autocmd_id then
+    pcall(vim.api.nvim_del_autocmd, term.autocmd_id)
+    term.autocmd_id = nil
+  end
+  if term.job_id then
+    pcall(vim.fn.jobstop, term.job_id)
+    term.job_id = nil
+  end
+  if term:buf_valid() then
+    pcall(vim.api.nvim_buf_delete, term.buf, { force = true })
+    term.buf = nil
+  end
+  terminal.terminals[term_id] = nil
 end
 
---- Click handler for close button
-function _G.TinyTermCloseClick()
-  local win_id = vim.api.nvim_get_current_win()
-  local ok, term_id = pcall(vim.api.nvim_win_get_var, win_id, "tiny_term_id")
-  if ok and term_id then
-    local terminal = require("tiny-term.terminal")
-    local term = terminal.get(term_id)
-    if term and term.close then
-      term:close()
-    end
-  end
-end
-
---- Stack a buffer in an existing split window, or create a new split
---- @param buf integer Buffer ID to stack
---- @param position string Position ("bottom", "top", "left", "right")
---- @param opts table Options table
----   - win.split_size: number (rows for bottom/top, cols for left/right)
----   - win.stack: boolean Enable stacking (default: true)
----   - term: TinyTerm.Terminal Terminal object
---- @return integer win_id Window ID
 function M.stack_in_split(buf, position, opts)
   local win_opts = opts.win or {}
   local split_size = win_opts.split_size or 15
-  local enable_stack = win_opts.stack == nil and true or win_opts.stack
+  local enable_stack = win_opts.stack ~= false
 
   local existing_win = enable_stack and M.get_split(position)
 
@@ -383,9 +432,10 @@ function M.stack_in_split(buf, position, opts)
   return win_id
 end
 
---- Clear all split windows tracking (for testing)
 function M.clear_split_windows()
   split_windows = {}
+  split_terminals = {}
+  split_active_term = {}
 end
 
 return M
