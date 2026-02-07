@@ -118,7 +118,7 @@ end
 
 local function split_at(position, split_size)
   local split_cmd
-  if position == "bottom" then
+  if position == "bottom" or position == nil then
     split_cmd = "botright " .. split_size .. "split"
   elseif position == "top" then
     split_cmd = "topleft " .. split_size .. "split"
@@ -126,8 +126,6 @@ local function split_at(position, split_size)
     split_cmd = "botright vertical " .. split_size .. "split"
   elseif position == "left" then
     split_cmd = "topleft vertical " .. split_size .. "split"
-  else
-    split_cmd = "botright " .. split_size .. "split"
   end
   vim.cmd(split_cmd)
 end
@@ -377,29 +375,11 @@ function _G.TinyTermTabCloseClick(tab_idx)
       end
     end
     term.win = nil
+    term.exited = true
+    terminal.terminals[term_id] = nil
   else
-    pcall(vim.api.nvim_win_close, win_id, true)
+    term:close()
   end
-
-  term.exited = true
-  if term.esc_timer then
-    term.esc_timer:close()
-    term.esc_timer = nil
-  end
-  term.esc_count = 0
-  if term.autocmd_id then
-    pcall(vim.api.nvim_del_autocmd, term.autocmd_id)
-    term.autocmd_id = nil
-  end
-  if term.job_id then
-    pcall(vim.fn.jobstop, term.job_id)
-    term.job_id = nil
-  end
-  if term:buf_valid() then
-    pcall(vim.api.nvim_buf_delete, term.buf, { force = true })
-    term.buf = nil
-  end
-  terminal.terminals[term_id] = nil
 end
 
 function M.stack_in_split(buf, position, opts)

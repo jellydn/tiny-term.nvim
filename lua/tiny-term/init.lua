@@ -3,15 +3,12 @@
 
 local M = {}
 
--- Import configuration module
 local config = require("tiny-term.config")
 
--- Expose config to users
 M.config = config.config
 
 ---Set up highlight groups for tiny-term
 local function setup_highlights()
-  -- Link to existing highlights by default for consistency
   vim.api.nvim_set_hl(0, "TinyTermNormal", { link = "NormalFloat", default = true })
   vim.api.nvim_set_hl(0, "TinyTermBorder", { link = "FloatBorder", default = true })
   vim.api.nvim_set_hl(0, "TinyTermWinbar", { link = "WinBar", default = true })
@@ -34,7 +31,6 @@ function M.setup(opts)
   return M
 end
 
--- Import modules
 local terminal = require("tiny-term.terminal")
 local util = require("tiny-term.util")
 
@@ -78,21 +74,17 @@ end
 function M.toggle(cmd, opts)
   opts = opts or {}
 
-  -- Get or create the terminal
   local term = terminal.get_or_create(cmd, opts)
 
-  -- Toggle visibility
   if term:is_visible() then
     term:hide()
   else
     term:show()
 
-    -- Handle auto_insert option when showing
     local auto_insert = opts.auto_insert
     if auto_insert == nil then
       auto_insert = config.config.auto_insert
     end
-
     if auto_insert then
       vim.api.nvim_set_current_win(term.win)
       vim.cmd("startinsert")
@@ -111,7 +103,6 @@ end
 function M.open(cmd, opts)
   opts = opts or {}
 
-  -- Always create a new terminal (bypasses ID reuse)
   local term = terminal.create_new(cmd, opts)
   term:show()
 

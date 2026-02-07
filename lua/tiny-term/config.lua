@@ -3,7 +3,6 @@
 
 local M = {}
 
--- Default configuration
 ---@class TinyTerm.Config
 ---@field shell string Shell command to use
 ---@field win table Window configuration
@@ -11,10 +10,8 @@ local M = {}
 ---@field auto_insert boolean Enter insert mode on toggle
 ---@field auto_close boolean Close window on process exit
 local defaults = {
-  -- Shell to use for terminals
   shell = vim.o.shell,
 
-  -- Window configuration
   win = {
     -- Position: "float", "bottom", "top", "left", "right"
     -- Default: auto (cmd provided -> "float", no cmd -> "bottom")
@@ -23,10 +20,8 @@ local defaults = {
     width = 0.8,
     height = 0.8,
 
-    -- Border style (nil uses 'winborder' option from Neovim 0.11)
     border = nil,
 
-    -- Split size in rows/columns
     split_size = 15,
 
     -- Enable split stacking (tmux-like behavior)
@@ -51,10 +46,8 @@ local defaults = {
   override_snacks = false,
 }
 
--- Current configuration (initialized with defaults)
 M.config = vim.deepcopy(defaults)
 
----Setup tiny-term with user options
 ---@param opts? table User configuration options
 function M.setup(opts)
   M.config = vim.tbl_deep_extend("force", defaults, opts or {})

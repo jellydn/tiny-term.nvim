@@ -42,26 +42,24 @@ function Terminal.new(cmd, opts)
 end
 
 local function _refresh_splits_if_needed(term)
-  if not term.win or type(term.win) ~= "number" then
+  if not term.win then
     return
   end
 
   local win_id = term.win
-  local window = require("tiny-term.window")
   window.unregister_terminal_from_split(win_id, term.id)
   local remaining = window.get_split_terminals(win_id)
   if #remaining == 0 then
     return
   end
 
-  local terminal = require("tiny-term.terminal")
-  local next_term = terminal.get(remaining[1])
+  local next_term = M.get(remaining[1])
   if not next_term then
     return
   end
 
   vim.schedule(function()
-    if type(win_id) == "number" and vim.api.nvim_win_is_valid(win_id) then
+    if vim.api.nvim_win_is_valid(win_id) then
       window.switch_to_terminal(win_id, remaining[1])
     end
   end)
@@ -173,19 +171,13 @@ function Terminal:setup_keymaps()
   end
 
   local opts = self.opts or {}
-  local win_opts = opts.win or {}
-  local keys = win_opts.keys or config.config.win.keys or window.get_default_keys()
-  local is_floating = self:is_floating()
+  local keys = (opts.win or {}).keys or config.config.win.keys or window.get_default_keys()
   local nav_keys = { ["<C-h>"] = true, ["<C-j>"] = true, ["<C-k>"] = true, ["<C-l>"] = true }
 
   for _, keymap in ipairs(keys) do
     if keymap[1] ~= false then
-      local mode = keymap.mode or "n"
-      local lhs = keymap[1]
-      local rhs = keymap[2]
-
-      if not (is_floating and nav_keys[lhs]) then
-        vim.keymap.set(mode, lhs, rhs, {
+      if not (self:is_floating() and nav_keys[keymap[1]]) then
+        vim.keymap.set(keymap.mode or "n", keymap[1], keymap[2], {
           desc = keymap.desc,
           buffer = self.buf,
           noremap = true,
@@ -224,7 +216,8 @@ function Terminal:show()
     end)
   end
 
-  local start_insert = (self.opts or {}).start_insert
+  local opts = self.opts or {}
+  local start_insert = opts.start_insert
   if start_insert == nil then
     start_insert = config.config.start_insert
   end
@@ -308,7 +301,8 @@ function Terminal:handle_exit()
 
   self.job_id = nil
 
-  local auto_close = (self.opts or {}).auto_close
+  local opts = self.opts or {}
+  local auto_close = opts.auto_close
   if auto_close == nil then
     auto_close = config.config.auto_close
   end
@@ -325,10 +319,7 @@ function Terminal:handle_exit()
 end
 
 function Terminal:is_floating()
-  if not self.win or not vim.api.nvim_win_is_valid(self.win) then
-    return false
-  end
-  return window.is_floating(self.win)
+  return self.win and vim.api.nvim_win_is_valid(self.win) and window.is_floating(self.win)
 end
 
 function Terminal:is_visible()
@@ -336,10 +327,7 @@ function Terminal:is_visible()
     return false
   end
 
-  local current_tab = vim.api.nvim_get_current_tabpage()
-  local win_tab = vim.api.nvim_win_get_tabpage(self.win)
-
-  return win_tab == current_tab
+  return vim.api.nvim_win_get_tabpage(self.win) == vim.api.nvim_get_current_tabpage()
 end
 
 function Terminal:on_current_tab()
@@ -347,10 +335,7 @@ function Terminal:on_current_tab()
 end
 
 function Terminal:buf_valid()
-  if self.buf == nil then
-    return false
-  end
-  return vim.api.nvim_buf_is_valid(self.buf)
+  return self.buf ~= nil and vim.api.nvim_buf_is_valid(self.buf)
 end
 
 function Terminal:focus()
@@ -360,7 +345,8 @@ function Terminal:focus()
 
   vim.api.nvim_set_current_win(self.win)
 
-  local auto_insert = (self.opts or {}).auto_insert
+  local opts = self.opts or {}
+  local auto_insert = opts.auto_insert
   if auto_insert == nil then
     auto_insert = config.config.auto_insert
   end

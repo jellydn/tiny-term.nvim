@@ -12,7 +12,7 @@ function M.tid(cmd, opts)
 
   local id_parts = { cmd_key, cwd, tostring(count) }
 
-  if opts.env and type(opts.env) == "table" then
+  if opts.env then
     local env_keys = {}
     for k, _ in pairs(opts.env) do
       table.insert(env_keys, k)
