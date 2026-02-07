@@ -404,7 +404,7 @@ MIT
 1. *License*: https://img.shields.io/github/license/jellydn/tiny-term.nvim?style=for-the-badge&logo=starship&color=ee999f&logoColor=D9E0EE&labelColor=302D41
 2. *Stars*: https://img.shields.io/github/stars/jellydn/tiny-term.nvim?style=for-the-badge&logo=starship&color=c69ff5&logoColor=D9E0EE&labelColor=302D41
 3. *Issues*: https://img.shields.io/github/issues/jellydn/tiny-term.nvim?style=for-the-badge&logo=bilibili&color=F5E0DC&logoColor=D9E0EE&labelColor=302D41
-4. *Demo*: https://gyazo.com/a1812139c96322b51813e39b9c3faedb.gif
+4. *Demo*: https://gyazo.com/084d884839a3e3e84525a2d527ecec6b.gif
 5. *@jellydn*: 
 6. *@jellydn*: 
 7. *Ko-fi*: https://img.shields.io/badge/Ko--fi-F16061?style=for-the-badge&logo=ko-fi&logoColor=white
