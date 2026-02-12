@@ -1518,33 +1518,6 @@ describe("tiny-term.override_snacks()", function()
     assert.equals(tiny_term, result)
   end)
 
-  it("should notify when snacks.nvim is not found", function()
-    -- Arrange
-    local notified = false
-    local notify_messages = {}
-    local original_notify = vim.notify
-
-    -- Mock vim.notify to capture messages
-    ---@diagnostic disable-next-line: duplicate-set-field
-    vim.notify = function(msg, level)
-      notified = true
-      table.insert(notify_messages, { msg = msg, level = level })
-    end
-
-    -- Act - Assuming snacks is not installed in test environment
-    tiny_term.override_snacks()
-
-    -- Assert
-    assert.is_true(notified)
-    local has_snacks_message = vim.tbl_filter(function(m)
-      return m.msg:find("snacks") ~= nil
-    end, notify_messages)
-    assert.is_true(#has_snacks_message > 0)
-
-    -- Restore
-    vim.notify = original_notify
-  end)
-
   it("should call without errors when snacks is available", function()
     -- Arrange & Act
     -- This test just ensures the function doesn't error

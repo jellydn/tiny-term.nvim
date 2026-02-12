@@ -161,13 +161,14 @@ end
 function M.override_snacks()
   local ok, snacks = pcall(require, "snacks")
   if not ok then
-    vim.notify("tiny-term.nvim: snacks.nvim not found, skipping override", vim.log.levels.INFO)
+    -- Create fallback for Snacks.terminal API compatibility
+    -- Refer https://github.com/folke/snacks.nvim/blob/main/docs/terminal.md
+    _G.Snacks = _G.Snacks or {}
+    _G.Snacks.terminal = M
     return M
   end
 
   snacks.terminal = M
-  vim.notify("tiny-term.nvim: Snacks.terminal overridden", vim.log.levels.INFO)
-
   return M
 end
 
