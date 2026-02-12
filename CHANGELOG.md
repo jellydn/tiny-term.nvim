@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.0](https://github.com/jellydn/tiny-term.nvim/compare/v1.0.0...v1.1.0) (2026-02-12)
+
+
+### Features
+
+* create fallback Snacks.terminal when snacks.nvim not found ([7d5d65e](https://github.com/jellydn/tiny-term.nvim/commit/7d5d65e4ed01e750da25e658bc1ee304d442f3ef))
+
 ## 1.0.0 (2026-02-07)
 
 
