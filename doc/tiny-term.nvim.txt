@@ -1,5 +1,5 @@
 *tiny-term.nvim.txt*
-                                   For NVIM v0.8.0    Last change: 2026 May 16
+                             For NVIM v0.8.0    Last change: 2026 September 11
 
 ==============================================================================
 Table of Contents                           *tiny-term.nvim-table-of-contents*
