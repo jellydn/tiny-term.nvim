@@ -3,7 +3,7 @@
 all: test
 
 test:
-	nvim --headless -c "PlenaryBustedDirectory test/"
+	busted
 
 test-file:
 	@echo "Usage: make test-file TEST=path/to/test_spec.lua"
@@ -16,7 +16,7 @@ lint:
 
 help:
 	@echo "Available targets:"
-	@echo "  make test        - Run all tests with Plenary"
+	@echo "  make test        - Run all tests with Busted and nlua"
 	@echo "  make format      - Format Lua files with StyLua"
 	@echo "  make lint        - Check formatting with StyLua"
 	@echo "  make help        - Show this help"

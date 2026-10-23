@@ -1,5 +1,5 @@
 -- Tests for tiny-term.nvim utility functions
--- Run with: nvim --headless -c "PlenaryBustedDirectory test/"
+-- Run with: busted test/util_spec.lua
 -- Focus on behavior, not implementation details, using Arrange-Act-Assert pattern
 
 local util = require("tiny-term.util")
@@ -18,7 +18,7 @@ describe("util.parse()", function()
       local result = util.parse(cmd)
 
       -- Assert
-      assert.is_true(vim.tbl_islist(result))
+      assert.is_true(vim.islist(result))
       assert.equals(1, #result)
       assert.equals("ls", result[1])
     end)
@@ -194,7 +194,7 @@ describe("util.parse()", function()
       local result = util.parse(cmd)
 
       -- Assert
-      assert.is_true(vim.tbl_islist(result))
+      assert.is_true(vim.islist(result))
       assert.equals(0, #result)
     end)
 

@@ -1,5 +1,5 @@
 -- Tests for tiny-term.nvim
--- Run with: nvim --headless -c "PlenaryBustedDirectory test/"
+-- Run with: busted test/tiny_term_spec.lua
 -- Focus on behavior, not implementation details, using Arrange-Act-Assert pattern
 
 local tiny_term = require("tiny-term")
@@ -421,7 +421,7 @@ describe("tiny-term.list()", function()
     local terms = tiny_term.list()
 
     -- Assert
-    assert.is_true(vim.tbl_islist(terms))
+    assert.is_true(vim.islist(terms))
     assert.equals(0, #terms)
   end)
 
@@ -964,7 +964,7 @@ describe("terminal module", function()
       local result = terminal.list()
 
       -- Assert
-      assert.is_true(vim.tbl_islist(result))
+      assert.is_true(vim.islist(result))
       assert.equals(0, #result)
     end)
 

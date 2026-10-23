@@ -30,8 +30,8 @@ build = {
 }
 test_dependencies = {
   "nlua",
+  "busted",
 }
 test = {
-  type = "command",
-  test = "test.lua",
+  type = "busted",
 }
