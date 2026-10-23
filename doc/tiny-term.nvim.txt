@@ -1,5 +1,5 @@
 *tiny-term.nvim.txt*
-                             For NVIM v0.8.0    Last change: 2026 September 11
+                               For NVIM v0.8.0    Last change: 2026 October 23
 
 ==============================================================================
 Table of Contents                           *tiny-term.nvim-table-of-contents*
@@ -13,6 +13,7 @@ Table of Contents                           *tiny-term.nvim-table-of-contents*
   - ⚙️ Configuration  |tiny-term.nvim-tiny-term.nvim-⚙️-configuration|
   - 🔧 API Reference      |tiny-term.nvim-tiny-term.nvim-🔧-api-reference|
   - 🔧 How It Works        |tiny-term.nvim-tiny-term.nvim-🔧-how-it-works|
+  - Development                    |tiny-term.nvim-tiny-term.nvim-development|
   - 👤 Author                    |tiny-term.nvim-tiny-term.nvim-👤-author|
   - Show Your Support        |tiny-term.nvim-tiny-term.nvim-show-your-support|
   - 📝 License                  |tiny-term.nvim-tiny-term.nvim-📝-license|
@@ -123,16 +124,16 @@ BASIC USAGE ~
 >lua
     -- Toggle shell terminal (default)
     require("tiny-term").toggle()
-    
+
     -- Toggle terminal running a command
     require("tiny-term").toggle("lazygit")
-    
+
     -- Open a new terminal (always shows)
     require("tiny-term").open("npm run dev")
-    
+
     -- Get existing terminal or create new one
     local term, created = require("tiny-term").get("htop")
-    
+
     -- List all active terminals
     local terminals = require("tiny-term").list()
 <
@@ -145,7 +146,7 @@ RECOMMENDED KEYMAPS ~
     vim.keymap.set("n", "<C-/>", function()
       require("tiny-term").toggle()
     end, { desc = "Toggle terminal" })
-    
+
     -- Toggle terminal with count (e.g., 2<C-/> for terminal #2)
     vim.keymap.set("n", "<C-_>", function()
       local count = vim.v.count1
@@ -170,36 +171,36 @@ RECOMMENDED KEYMAPS ~
     require("tiny-term").setup({
       -- Shell to use for terminals (default: vim.o.shell)
       shell = vim.o.shell,
-    
+
       -- Window configuration
       win = {
         -- Position: "float", "bottom", "top", "left", "right"
         -- Default: auto (cmd provided -> "float", no cmd -> "bottom")
-    
+
         -- Float window size (as fraction of editor)
         width = 0.8,
         height = 0.8,
-    
+
         -- Border style (nil uses 'winborder' option from Neovim 0.11)
         border = nil,
-    
+
         -- Split size in rows/columns
         split_size = 15,
-    
+
         -- Enable split stacking (tmux-like behavior)
         stack = true,
-    
+
         -- Default keymaps for terminal windows (nil uses built-in defaults)
         -- Override to customize or set to false to disable specific mappings
         keys = nil,
       },
-    
+
       -- Start in insert mode when terminal opens
       start_insert = true,
-    
+
       -- Enter insert mode when toggling terminal visible
       auto_insert = true,
-    
+
       -- Close window when terminal process exits
       auto_close = true,
     })
@@ -227,13 +228,13 @@ This allows toggling multiple terminals:
 >lua
     -- Terminal #1 (default)
     require("tiny-term").toggle()
-    
+
     -- Terminal #2 (different count)
     require("tiny-term").toggle(nil, { count = 2 })
-    
+
     -- Terminal for specific directory
     require("tiny-term").toggle(nil, { cwd = "/path/to/project" })
-    
+
     -- Terminal with specific environment
     require("tiny-term").toggle("npm run dev", { env = { NODE_ENV = "development" } })
 <
@@ -371,6 +372,23 @@ Terminal objects returned by the API have the following methods:
 - **Keymaps**: Configurable terminal keymaps including double-esc detection using `vim.uv.new_timer()`
 - **Neovim 0.11 features**: Leverages `'winborder'`, improved `nvim_open_win()`, terminal reflow, and `hl-StatusLineTerm`
 - **Cross-platform**: Uses configured shell (`vim.o.shell`) for running commands
+
+
+DEVELOPMENT                        *tiny-term.nvim-tiny-term.nvim-development*
+
+Install the test tools and run the existing Busted specs through Neovim with
+nlua:
+
+>bash
+    luarocks install busted
+    luarocks install nlua
+    make test
+    busted test/util_spec.lua # Run one test file
+    luarocks test             # Run the same suite through LuaRocks, as in CI
+<
+
+The `.busted` configuration selects nlua and the `test/` directory. No plugin
+dependencies or personal Neovim configuration are needed for the tests.
 
 
 👤 AUTHOR                        *tiny-term.nvim-tiny-term.nvim-👤-author*
