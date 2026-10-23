@@ -9,20 +9,24 @@ tiny-term is a minimal terminal toggle plugin for Neovim 0.11+. It provides a dr
 ### Run Full Test Suite
 
 ```bash
-nvim --headless -c "PlenaryBustedDirectory test/"
+make test
 ```
 
 ### Run Single Test File
 
 ```bash
-nvim --headless -c "PlenaryBustedDirectory test/tiny_term_spec.lua" -c "qa!"
+busted test/tiny_term_spec.lua
 ```
 
 ### Run Single Test (by pattern)
 
 ```bash
-nvim --headless -c "PlenaryBustedDirectory test/ --tags=focus" -c "qa!"
+busted --filter="should merge user config with defaults"
 ```
+
+Install the test tools with `luarocks install busted` and `luarocks install nlua`.
+The `.busted` configuration runs the specs in Neovim via nlua.
+`luarocks test` runs the same suite in CI.
 
 ### Check Code Formatting
 
@@ -179,14 +183,14 @@ lua/tiny-term/          # Core plugin modules
   config.lua            # Configuration system
   util.lua              # Helper functions
 plugin/                 # Neovim commands and startup hooks
-test/                  # Plenary/Busted specs (*_spec.lua)
+test/                  # Busted/nlua specs (*_spec.lua)
 doc/                   # Generated vimdoc
 examples/              # Configuration snippets
 ```
 
 ## Testing Guidelines
 
-- Use Plenary's Busted runner via Neovim headless
+- Use Busted with nlua via the existing `.busted` configuration
 - Test files: `test/*_spec.lua` naming convention
 - Follow **Arrange-Act-Assert** pattern
 - Use `after_each` for cleanup

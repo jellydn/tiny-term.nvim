@@ -314,6 +314,21 @@ Terminal objects returned by the API have the following methods:
 - **Neovim 0.11 features**: Leverages `'winborder'`, improved `nvim_open_win()`, terminal reflow, and `hl-StatusLineTerm`
 - **Cross-platform**: Uses configured shell (`vim.o.shell`) for running commands
 
+## Development
+
+Install the test tools and run the existing Busted specs through Neovim with nlua:
+
+```bash
+luarocks install busted
+luarocks install nlua
+make test
+busted test/util_spec.lua # Run one test file
+luarocks test             # Run the same suite through LuaRocks, as in CI
+```
+
+The `.busted` configuration selects nlua and the `test/` directory. No plugin
+dependencies or personal Neovim configuration are needed for the tests.
+
 ## 👤 Author
 
 **Huynh Duc Dung**
