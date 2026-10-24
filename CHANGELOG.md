@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.1.1](https://github.com/jellydn/tiny-term.nvim/compare/v1.1.0...v1.1.1) (2026-10-24)
+
+### Tests
+
+* Replace the Plenary test runner with Busted and nlua ([#8](https://github.com/jellydn/tiny-term.nvim/pull/8)). Runtime behavior is unchanged.
+
 ## [1.1.0](https://github.com/jellydn/tiny-term.nvim/compare/v1.0.0...v1.1.0) (2026-02-12)
 
 
